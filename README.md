@@ -29,6 +29,30 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8010
 ```
 
+## 開放給公司內網同事使用
+
+預設只在本機(`localhost`)可連線。要讓同辦公室、同網段的同事連進來:
+
+```bash
+# 後端:綁定到所有網卡(0.0.0.0),而不只是 localhost
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8010
+
+# 前端:vite.config.ts 已設定 server.host = true,npm run dev 會自動
+# 印出可供同網段使用的「Network」網址(例如 http://192.168.1.23:5173)
+npm run dev
+```
+
+同事連到前端網址後,前端預設仍會打 `http://localhost:8010`(也就是同事自己機器的 8010,不是你的)。要讓他們連到你開的後端,啟動前端時指定:
+
+```bash
+VITE_API_BASE=http://<你的內網IP>:8010 npm run dev
+```
+
+後端的 CORS 設定已允許所有私有網段(`10.x` / `172.16-31.x` / `192.168.x`)的來源連線,不需要額外調整。
+
+⚠️ 目前沒有真正的登入驗證,只靠前端「目前身分(暫代登入)」切換器模擬身分(見下節)。開放給其他人連線前請注意:任何能連到這個網址的人都能任意切換身分、看到他人專案資料,僅適合可信的內網環境,不要開放到公開網際網路。
+
 ## 技術棧
 
 - 前端:React + TypeScript + Vite + react-router-dom

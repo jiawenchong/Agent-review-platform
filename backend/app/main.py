@@ -2,7 +2,9 @@
 
 Wires the six data tables, the closed-loop monitor and the guardrail layer
 described in the backend planning document into a runnable service. CORS is
-open to the Vite dev server so the existing React frontend can consume it.
+open to the Vite dev server so the existing React frontend can consume it,
+plus any private-network origin so colleagues on the same office LAN can
+reach a server started with --host 0.0.0.0 (see README for setup).
 """
 from __future__ import annotations
 
@@ -41,9 +43,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Private-network IPv4 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) so
+# the dev server is reachable from other machines on the same office LAN.
+_PRIVATE_NETWORK_ORIGIN_REGEX = (
+    r"http://(localhost|127\.0\.0\.1"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?"
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:5180"],
+    allow_origin_regex=_PRIVATE_NETWORK_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )
