@@ -13,11 +13,27 @@
 
 ## 開發
 
+前端:
+
 ```bash
 npm install
 npm run dev
 ```
 
+「上傳資料」頁會把檔案送到後端 API(預設 `http://localhost:8010`,可用 `VITE_API_BASE` 覆寫)。
+要使用上傳功能,請一併啟動後端:
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8010
+```
+
 ## 技術棧
 
-React + TypeScript + Vite + react-router-dom
+- 前端:React + TypeScript + Vite + react-router-dom
+- 後端:FastAPI + SQLAlchemy(見 [`backend/`](./backend/))— closed-loop 進度治理、紅線稽核、文件上傳解析與 LLM 判讀
+
+## 目前串接狀態
+
+「上傳資料」頁已串接後端(上傳 → 後端抽取全文 → LLM 判讀);其餘頁面仍使用前端內建的 seed 假資料,將於後續整批串接。

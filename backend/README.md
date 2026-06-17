@@ -24,6 +24,7 @@ pytest -q
 
 | 規劃書 | 實作位置 |
 | --- | --- |
+| Word 解析模組 + AI 評審中心(上傳判讀) | `services/extraction.py` + `services/ingestion.py` + `services/llm.py::review_document` |
 | §三 Closed Loop 四階段 | `services/decision.py` `weekly_scan()` |
 | §五 資料模型(6 表 + users) | `models.py` |
 | §六 Decision Flow / pseudocode | `services/decision.py` |
@@ -50,6 +51,9 @@ pytest -q
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康檢查 + stub 狀態 |
+| GET | `/api/uploads/supported` | 支援的檔案副檔名 |
+| POST | `/api/uploads` | 上傳多個檔案(PDF/PPTX/DOCX/TXT),抽取全文並交 LLM 判讀 |
+| GET | `/api/uploads` `/{id}` | 已上傳文件列表 / 單一文件(含擷取全文) |
 | GET/POST | `/api/projects` | 專案列表 / 建立(依 ACL 過濾) |
 | GET | `/api/projects/{id}` | 專案詳情 |
 | GET | `/api/projects/{id}/snapshots` | 進度快照歷史 |

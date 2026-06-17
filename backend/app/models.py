@@ -156,6 +156,40 @@ class Report(Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class DocumentStatus(str, enum.Enum):
+    PARSING = "parsing"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class Document(Base):
+    """An uploaded source document (PDF / DOCX / PPTX …).
+
+    Holds the extracted text and the AI 評審中心 (LLM) interpretation. This is
+    the ingestion record behind the Upload page.
+    """
+
+    __tablename__ = "documents"
+
+    document_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str | None] = mapped_column(String, nullable=True)  # pdf/docx/pptx/txt
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    status: Mapped[DocumentStatus] = mapped_column(
+        Enum(DocumentStatus), default=DocumentStatus.PARSING, nullable=False
+    )
+    char_count: Mapped[int] = mapped_column(Integer, default=0)
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # AI 評審中心 (LLM 判讀) output
+    llm_verdict: Mapped[str | None] = mapped_column(String, nullable=True)  # 綠燈/紅燈/待補件
+    llm_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_key_points: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    llm_reasons: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
 class User(Base):
     """Minimal user/ACL table backing the Information Isolation guardrail.
 
