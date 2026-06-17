@@ -18,6 +18,16 @@ from .connectors import RagHit, rag
 
 
 @dataclass
+class DocumentReview:
+    """AI 評審中心 output for an uploaded document (§四)."""
+
+    verdict: str            # 綠燈 / 紅燈 / 待補件
+    summary: str
+    key_points: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AppealEvaluation:
     reasonable: bool
     reason: str
@@ -33,7 +43,43 @@ _VAGUE_MARKERS = ("再看看", "應該會好", "盡量", "再說", "沒問題啦
 _CONCRETE_MARKERS = ("預計", "已完成", "里程碑", "時程", "補件", "排程", "負責", "日前", "週內", "驗證")
 
 
+# Structured-proposal sections the AI 評審中心 expects in a planning doc.
+_EXPECTED_SECTIONS = ("目標", "範圍", "時程", "風險", "資源", "里程碑")
+
+
 class StubLLM:
+    def review_document(self, *, filename: str, text: str) -> DocumentReview:
+        """判讀 an extracted document — the AI 評審中心 step.
+
+        The stub gives a transparent, auditable read: it summarises the
+        content, pulls out the leading lines as key points, and decides a
+        紅燈/綠燈/待補件 verdict from how complete the structured proposal is.
+        A real Llama3/GPT4o connector implements the same contract.
+        """
+        clean = text.strip()
+        lines = [ln.strip() for ln in clean.splitlines() if ln.strip()]
+        char_count = len(clean)
+
+        present = [s for s in _EXPECTED_SECTIONS if s in clean]
+        missing = [s for s in _EXPECTED_SECTIONS if s not in clean]
+        key_points = lines[:5]
+
+        if len(present) >= 4:
+            verdict = "綠燈"
+            reasons = [f"涵蓋 {len(present)} 項必要章節:{'、'.join(present)}。"]
+        elif char_count < 80:
+            verdict = "待補件"
+            reasons = ["內容過少,無法構成可評審的規劃書。"]
+        else:
+            verdict = "紅燈"
+            reasons = [f"缺少必要章節:{'、'.join(missing)},不符合規劃書結構要求。"]
+
+        summary = (
+            f"文件《{filename}》共擷取 {char_count} 字、{len(lines)} 行;"
+            f"評審結果:{verdict}。"
+        )
+        return DocumentReview(verdict=verdict, summary=summary, key_points=key_points, reasons=reasons)
+
     def evaluate_appeal(
         self,
         *,

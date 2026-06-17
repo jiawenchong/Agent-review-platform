@@ -6,6 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 from .models import (
+    DocumentStatus,
     GuardrailType,
     LLMVerdict,
     NotificationType,
@@ -114,6 +115,40 @@ class ReportOut(ORMModel):
     file_url: str | None
     generated_by: ReportSource
     summary: str | None
+
+
+# ── documents / uploads ────────────────────────────────────────────────
+
+
+class DocumentOut(ORMModel):
+    document_id: int
+    filename: str
+    kind: str | None
+    size_bytes: int
+    uploaded_at: datetime
+    status: DocumentStatus
+    char_count: int
+    extracted_text: str | None
+    error: str | None
+    llm_verdict: str | None
+    llm_summary: str | None
+    llm_key_points: list | None
+    llm_reasons: list | None
+
+
+class DocumentSummary(ORMModel):
+    """List view — omits the (potentially large) extracted text."""
+
+    document_id: int
+    filename: str
+    kind: str | None
+    size_bytes: int
+    uploaded_at: datetime
+    status: DocumentStatus
+    char_count: int
+    error: str | None
+    llm_verdict: str | None
+    llm_summary: str | None
 
 
 # ── scan ───────────────────────────────────────────────────────────────
