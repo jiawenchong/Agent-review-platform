@@ -19,6 +19,8 @@ export interface UploadedDocument {
   llm_summary: string | null;
   llm_key_points: string[] | null;
   llm_reasons: string[] | null;
+  flowchart_mermaid: string | null;
+  flowchart_mode: string | null;
 }
 
 export async function uploadDocuments(files: File[]): Promise<UploadedDocument[]> {

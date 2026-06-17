@@ -189,6 +189,10 @@ class Document(Base):
     llm_key_points: Mapped[list | None] = mapped_column(JSON, nullable=True)
     llm_reasons: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    # 計畫流程圖生成 (Mermaid)
+    flowchart_mermaid: Mapped[str | None] = mapped_column(Text, nullable=True)
+    flowchart_mode: Mapped[str | None] = mapped_column(String, nullable=True)  # structured/inferred
+
 
 class User(Base):
     """Minimal user/ACL table backing the Information Isolation guardrail.
