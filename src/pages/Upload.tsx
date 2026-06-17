@@ -1,7 +1,20 @@
 import { useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { Mermaid } from '../components/Mermaid';
 import { uploadDocuments, type UploadedDocument } from '../api/client';
+
+const FIELD_LABELS: Record<string, string> = {
+  agent_name: 'Agent 名稱',
+  proposer: '提案人',
+  department: '部門',
+  goal: '目標',
+  scope: '範圍',
+  timeline: '時程 / 里程碑',
+  risk: '風險',
+  resource: '資源',
+  architecture: '系統架構',
+};
 
 const ACCEPT = '.pdf,.pptx,.docx,.txt,.md';
 const ACCEPT_LABEL = 'PDF · PPTX · DOCX';
@@ -19,6 +32,7 @@ function formatSize(bytes: number): string {
 }
 
 export function Upload() {
+  const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
   const [results, setResults] = useState<UploadedDocument[]>([]);
   const [error, setError] = useState('');
@@ -147,6 +161,52 @@ export function Upload() {
                             {doc.llm_reasons.map((r, i) => <li key={i}>{r}</li>)}
                           </ul>
                         )}
+
+                        {doc.extracted_fields && Object.keys(doc.extracted_fields).length > 0 && (
+                          <div
+                            style={{
+                              marginTop: 12, padding: '14px 16px', background: 'var(--surface-alt)',
+                              border: '1px solid var(--border-subtle)', borderRadius: 10,
+                            }}
+                          >
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, fontFamily: 'var(--font-mono)' }}>
+                              擷取的結構化欄位
+                            </div>
+                            <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 16px', margin: 0 }}>
+                              {Object.entries(doc.extracted_fields).map(([key, value]) => (
+                                <div key={key} style={{ display: 'contents' }}>
+                                  <dt style={{ fontSize: 12, color: 'var(--text-mid)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                    {FIELD_LABELS[key] ?? key}
+                                  </dt>
+                                  <dd style={{ fontSize: 12.5, color: 'var(--text)', margin: 0 }}>{value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </div>
+                        )}
+
+                        {doc.created_project_id && (
+                          <div
+                            style={{
+                              marginTop: 12, padding: '14px 16px', display: 'flex', alignItems: 'center',
+                              gap: 12, flexWrap: 'wrap', background: 'var(--green-bg)',
+                              border: '1px solid var(--green-border)', borderRadius: 10,
+                            }}
+                          >
+                            <span style={{ color: 'var(--green-text)', fontWeight: 600 }}>
+                              ✓ 已自動建立專案
+                            </span>
+                            <span className="mono-id">{doc.created_project_id}</span>
+                            <button
+                              className="btn btn-primary"
+                              style={{ marginLeft: 'auto', padding: '6px 16px' }}
+                              onClick={() => navigate(`/?highlight=${doc.created_project_id}`)}
+                            >
+                              前往儀表板
+                            </button>
+                          </div>
+                        )}
+
                         <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <button
                             className="btn btn-outline"

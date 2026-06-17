@@ -7,9 +7,13 @@ explicit failure rather than fabricated content.
 """
 from __future__ import annotations
 
+import re
+from datetime import datetime
+
 from sqlalchemy.orm import Session
 
-from ..models import Document, DocumentStatus, GuardrailType
+from ..models import Document, DocumentStatus, GuardrailType, Project, ProjectStatus
+from .blueprint import extract_fields
 from .extraction import ExtractionError, extract_text
 from .flowchart import generate_flowchart
 from .guardrails import record_event
@@ -53,8 +57,41 @@ def ingest_file(db: Session, *, filename: str, data: bytes) -> Document:
     doc.flowchart_mermaid = flow.mermaid
     doc.flowchart_mode = flow.mode
 
+    # 結構化欄位抽取 (Word 解析模組)
+    fields = extract_fields(text)
+    doc.extracted_fields = fields.as_dict()
+
+    # 自動建立專案:僅在 AI 評審中心核准 (綠燈) 且有 Agent 名稱時。
+    if review.verdict == "綠燈" and fields.agent_name:
+        project = _create_project_from_fields(db, fields)
+        doc.created_project_id = project.project_id
+
     doc.status = DocumentStatus.DONE
 
     db.commit()
     db.refresh(doc)
     return doc
+
+
+def _next_project_id(db: Session) -> str:
+    max_n = 0
+    for (pid,) in db.query(Project.project_id).all():
+        m = re.search(r"(\d+)$", pid or "")
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"PROJ-{max_n + 1:03d}"
+
+
+def _create_project_from_fields(db: Session, fields) -> Project:
+    project = Project(
+        project_id=_next_project_id(db),
+        name=fields.agent_name,
+        owner_id=fields.proposer or "未指定",
+        department=fields.department or "未分類",
+        status=ProjectStatus.NORMAL,
+        kanban_ref=None,
+        last_update_timestamp=datetime.utcnow(),
+    )
+    db.add(project)
+    db.flush()
+    return project
