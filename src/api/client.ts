@@ -21,6 +21,8 @@ export interface UploadedDocument {
   llm_reasons: string[] | null;
   flowchart_mermaid: string | null;
   flowchart_mode: string | null;
+  extracted_fields: Record<string, string> | null;
+  created_project_id: string | null;
 }
 
 export async function uploadDocuments(files: File[]): Promise<UploadedDocument[]> {

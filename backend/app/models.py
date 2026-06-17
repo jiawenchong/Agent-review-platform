@@ -193,6 +193,10 @@ class Document(Base):
     flowchart_mermaid: Mapped[str | None] = mapped_column(Text, nullable=True)
     flowchart_mode: Mapped[str | None] = mapped_column(String, nullable=True)  # structured/inferred
 
+    # 結構化欄位抽取 + 自動建立專案
+    extracted_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
 
 class User(Base):
     """Minimal user/ACL table backing the Information Isolation guardrail.

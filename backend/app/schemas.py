@@ -136,6 +136,8 @@ class DocumentOut(ORMModel):
     llm_reasons: list | None
     flowchart_mermaid: str | None
     flowchart_mode: str | None
+    extracted_fields: dict | None
+    created_project_id: str | None
 
 
 class FlowchartRequest(BaseModel):

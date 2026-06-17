@@ -26,6 +26,7 @@ pytest -q
 | --- | --- |
 | Word 解析模組 + AI 評審中心(上傳判讀) | `services/extraction.py` + `services/ingestion.py` + `services/llm.py::review_document` |
 | 計畫流程圖生成(Mermaid) | `services/flowchart.py` |
+| 結構化欄位抽取 + 綠燈自動建立專案 | `services/blueprint.py` + `services/ingestion.py` |
 | §三 Closed Loop 四階段 | `services/decision.py` `weekly_scan()` |
 | §五 資料模型(6 表 + users) | `models.py` |
 | §六 Decision Flow / pseudocode | `services/decision.py` |
