@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import Base, SessionLocal, engine
-from .routers import guardrails, notifications, projects, reports, scan, uploads
+from .routers import guardrails, notifications, projects, reports, scan, uploads, users
 from .scheduler import shutdown_scheduler, start_scheduler
 from .seed import seed
 
@@ -49,6 +49,7 @@ app.add_middleware(
 )
 
 app.include_router(uploads.router)
+app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(notifications.router)
 app.include_router(guardrails.router)

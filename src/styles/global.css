@@ -430,6 +430,34 @@ a {
   border-radius: 999px;
 }
 
+.sidebar-user-switch {
+  padding: 14px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-user-switch-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 6px;
+}
+
+.sidebar-user-select {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.sidebar-user-select option {
+  color: #111;
+}
+
 .sidebar-footer {
   padding: 16px 20px;
   font-family: var(--font-mono);

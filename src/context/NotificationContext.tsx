@@ -1,30 +1,66 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
-import { NOTIFICATIONS } from '../data/seed';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { listNotifications, markNotificationRead, type ApiNotification } from '../api/client';
 
 interface NotificationContextValue {
-  unreadIds: Set<string>;
+  notifications: ApiNotification[];
   unreadCount: number;
-  markRead: (id: string) => void;
+  loading: boolean;
+  error: string;
+  markRead: (id: number) => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
-  const [unreadIds, setUnreadIds] = useState<Set<string>>(
-    () => new Set(NOTIFICATIONS.map((n) => n.id)),
-  );
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const markRead = (id: string) => {
-    setUnreadIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const list = await listNotifications();
+      setNotifications(list);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '讀取通知失敗');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listNotifications()
+      .then((list) => {
+        if (!cancelled) {
+          setNotifications(list);
+          setError('');
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : '讀取通知失敗');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const markRead = useCallback(async (id: number) => {
+    const target = notifications.find((n) => n.notification_id === id);
+    if (!target || target.read_at) return;
+    const updated = await markNotificationRead(id);
+    setNotifications((prev) => prev.map((n) => (n.notification_id === id ? updated : n)));
+  }, [notifications]);
+
+  const unreadCount = notifications.filter((n) => !n.read_at).length;
 
   return (
-    <NotificationContext.Provider value={{ unreadIds, unreadCount: unreadIds.size, markRead }}>
+    <NotificationContext.Provider value={{ notifications, unreadCount, loading, error, markRead, refresh }}>
       {children}
     </NotificationContext.Provider>
   );

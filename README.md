@@ -20,8 +20,8 @@ npm install
 npm run dev
 ```
 
-「上傳資料」頁會把檔案送到後端 API(預設 `http://localhost:8010`,可用 `VITE_API_BASE` 覆寫)。
-要使用上傳功能,請一併啟動後端:
+所有頁面都會呼叫後端 API(預設 `http://localhost:8010`,可用 `VITE_API_BASE` 覆寫)。
+要完整使用本系統,請一併啟動後端:
 
 ```bash
 cd backend
@@ -36,4 +36,6 @@ uvicorn app.main:app --reload --port 8010
 
 ## 目前串接狀態
 
-「上傳資料」頁已串接後端(上傳 → 後端抽取全文 → LLM 判讀);其餘頁面仍使用前端內建的 seed 假資料,將於後續整批串接。
+前後端已全面串接(G1–G7):上傳、儀表板、專案詳情(含申訴提交)、通知中心、治理月報、紅線稽核紀錄皆呼叫真實後端 API,不再使用前端內建的 seed 假資料。
+
+真正的登入系統尚未實作(見 `docs/ROADMAP.md` H2)。所有 API 都需要 `X-User-Id` 標頭做 Information Isolation 判斷;在登入功能完成前,前端側邊欄提供一個「目前身分(暫代登入)」切換器,讓你選擇以哪個使用者身分操作,藉此也能實際體驗 ACL 紅線(非主管使用者只能看到自己負責的專案)。

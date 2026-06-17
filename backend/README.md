@@ -53,6 +53,7 @@ pytest -q
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康檢查 + stub 狀態 |
+| GET | `/api/users` | 使用者清單(無需驗證;僅列出身分,供前端在真正登入完成前切換 `X-User-Id`) |
 | GET | `/api/uploads/supported` | 支援的檔案副檔名 |
 | POST | `/api/uploads` | 上傳多個檔案(PDF/PPTX/DOCX/TXT),抽取全文、交 LLM 判讀並自動生成流程圖 |
 | GET | `/api/uploads` `/{id}` | 已上傳文件列表 / 單一文件(含擷取全文 + Mermaid 流程圖) |
