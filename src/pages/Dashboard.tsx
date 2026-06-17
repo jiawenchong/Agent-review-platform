@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { StatusPill } from '../components/StatusPill';
-import { PROJECTS } from '../data/seed';
 import { scoreColor } from '../data/styleMaps';
 import type { ProjectStatus } from '../data/types';
+import { listProjects, listUsers, projectStatus, type ApiProject, type ApiUser } from '../api/client';
 
 const STATUS_FILTERS: { key: ProjectStatus | 'all'; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -13,31 +13,74 @@ const STATUS_FILTERS: { key: ProjectStatus | 'all'; label: string }[] = [
   { key: 'red', label: '紅線觸發' },
 ];
 
+function formatDate(iso: string): string {
+  return iso.slice(0, 10);
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlight = searchParams.get('highlight');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
+  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const [users, setUsers] = useState<ApiUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const kpis = useMemo(() => {
-    const total = PROJECTS.length;
-    const normal = PROJECTS.filter((p) => p.status === 'normal').length;
-    const watch = PROJECTS.filter((p) => p.status === 'watch').length;
-    const red = PROJECTS.filter((p) => p.status === 'red').length;
-    return { total, normal, watch, red };
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listProjects(), listUsers()])
+      .then(([projs, us]) => {
+        if (cancelled) return;
+        setProjects(projs);
+        setUsers(us);
+        setError('');
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : '讀取專案列表失敗,請確認後端服務是否啟動。');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  const ownerName = useMemo(() => {
+    const map = new Map(users.map((u) => [u.user_id, u.name]));
+    return (id: string) => map.get(id) ?? id;
+  }, [users]);
+
+  const kpis = useMemo(() => {
+    const total = projects.length;
+    const normal = projects.filter((p) => projectStatus(p.status) === 'normal').length;
+    const watch = projects.filter((p) => projectStatus(p.status) === 'watch').length;
+    const red = projects.filter((p) => projectStatus(p.status) === 'red').length;
+    return { total, normal, watch, red };
+  }, [projects]);
+
   const filtered = useMemo(() => {
-    return PROJECTS.filter((p) => {
-      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
-      if (query && !p.name.includes(query) && !p.dept.includes(query) && !p.owner.includes(query)) return false;
+    return projects.filter((p) => {
+      const status = projectStatus(p.status);
+      if (statusFilter !== 'all' && status !== statusFilter) return false;
+      const owner = ownerName(p.owner_id);
+      if (query && !p.name.includes(query) && !p.department.includes(query) && !owner.includes(query)) return false;
       return true;
     });
-  }, [query, statusFilter]);
+  }, [projects, query, statusFilter, ownerName]);
 
   return (
     <>
       <PageHeader eyebrow="Governance Platform · 02" title="專案儀表板" />
       <div className="page-body">
+        {error && (
+          <div className="card" style={{ marginBottom: 16, padding: '14px 18px', color: 'var(--red-text)', borderColor: 'var(--red-border)' }}>
+            {error}
+          </div>
+        )}
+
         <div className="kpi-grid">
           <div className="kpi-card">
             <div className="kpi-label">總專案數</div>
@@ -96,20 +139,32 @@ export function Dashboard() {
             </thead>
             <tbody>
               {filtered.map((p) => (
-                <tr key={p.id} className="table-row" onClick={() => navigate(`/projects/${p.id}`)}>
-                  <td><span className="mono-id">{p.id}</span></td>
+                <tr
+                  key={p.project_id}
+                  className="table-row"
+                  onClick={() => navigate(`/projects/${p.project_id}`)}
+                  style={p.project_id === highlight ? { background: 'var(--green-bg)' } : undefined}
+                >
+                  <td><span className="mono-id">{p.project_id}</span></td>
                   <td>{p.name}</td>
-                  <td>{p.dept}</td>
-                  <td>{p.owner}</td>
-                  <td><StatusPill status={p.status} /></td>
+                  <td>{p.department}</td>
+                  <td>{ownerName(p.owner_id)}</td>
+                  <td><StatusPill status={projectStatus(p.status)} /></td>
                   <td style={{ color: scoreColor(p.score), fontWeight: 600 }}>{p.score}</td>
-                  <td><span className="mono-id">{p.lastUpdated}</span></td>
+                  <td><span className="mono-id">{formatDate(p.last_update_timestamp)}</span></td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
+              {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={7}>
                     <div className="empty-state">沒有符合條件的專案</div>
+                  </td>
+                </tr>
+              )}
+              {loading && (
+                <tr>
+                  <td colSpan={7}>
+                    <div className="empty-state">載入中…</div>
                   </td>
                 </tr>
               )}

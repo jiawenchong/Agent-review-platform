@@ -182,3 +182,13 @@ class ScanResult(BaseModel):
 class ScanRunOut(BaseModel):
     scanned: int
     results: list[ScanResult]
+
+
+# ── users ──────────────────────────────────────────────────────────────
+
+
+class UserOut(ORMModel):
+    user_id: str
+    name: str
+    is_manager: bool
+    project_ids: list[str]

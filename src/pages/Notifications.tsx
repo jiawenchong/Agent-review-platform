@@ -1,32 +1,40 @@
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
-import { NOTIFICATIONS } from '../data/seed';
 import { useNotifications } from '../context/NotificationContext';
-import type { NotifKind } from '../data/types';
+import type { ApiNotificationType } from '../api/client';
 
-const KIND_STYLE: Record<NotifKind, { color: string; bg: string; label: string }> = {
-  red: { color: 'var(--red-text)', bg: 'var(--red-bg)', label: '紅線' },
-  watch: { color: 'var(--amber-text)', bg: 'var(--amber-bg)', label: '預警' },
-  info: { color: 'var(--olive)', bg: 'var(--olive-bg)', label: '提醒' },
+const TYPE_STYLE: Record<ApiNotificationType, { color: string; bg: string; label: string }> = {
+  停滯預警: { color: 'var(--amber-text)', bg: 'var(--amber-bg)', label: '預警' },
+  升級通知: { color: 'var(--red-text)', bg: 'var(--red-bg)', label: '升級' },
 };
+
+function formatTs(iso: string): string {
+  return new Date(iso).toLocaleString('zh-TW', { hour12: false });
+}
 
 export function Notifications() {
   const navigate = useNavigate();
-  const { unreadIds, markRead } = useNotifications();
+  const { notifications, loading, error, markRead } = useNotifications();
 
   return (
     <>
       <PageHeader eyebrow="Governance Platform · 04" title="通知中心" />
       <div className="page-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {NOTIFICATIONS.map((n) => {
-          const unread = unreadIds.has(n.id);
-          const style = KIND_STYLE[n.kind];
+        {error && (
+          <div className="card" style={{ padding: '14px 18px', color: 'var(--red-text)', borderColor: 'var(--red-border)' }}>
+            {error}
+          </div>
+        )}
+        {loading && <div className="empty-state">載入中…</div>}
+        {!loading && notifications.map((n) => {
+          const unread = !n.read_at;
+          const style = TYPE_STYLE[n.type];
           return (
             <div
-              key={n.id}
+              key={n.notification_id}
               className="notif-row"
               style={unread ? { borderLeft: `3px solid ${style.color}` } : undefined}
-              onClick={() => navigate(`/projects/${n.projId}`)}
+              onClick={() => navigate(`/projects/${n.project_id}`)}
             >
               <span
                 className="chip"
@@ -37,7 +45,7 @@ export function Notifications() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ fontWeight: 600, color: 'var(--text-heading)' }}>{n.title}</span>
-                  <span className="mono-id" style={{ marginLeft: 'auto' }}>{n.ts}</span>
+                  <span className="mono-id" style={{ marginLeft: 'auto' }}>{formatTs(n.sent_at)}</span>
                 </div>
                 <p style={{ fontSize: 12.5, color: 'var(--text)', lineHeight: 1.6 }}>{n.body}</p>
               </div>
@@ -46,7 +54,7 @@ export function Notifications() {
                   className="mark-read-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    markRead(n.id);
+                    void markRead(n.notification_id);
                   }}
                 >
                   標記已讀
@@ -55,7 +63,7 @@ export function Notifications() {
             </div>
           );
         })}
-        {NOTIFICATIONS.length === 0 && <div className="empty-state">目前沒有通知</div>}
+        {!loading && notifications.length === 0 && <div className="empty-state">目前沒有通知</div>}
       </div>
     </>
   );
