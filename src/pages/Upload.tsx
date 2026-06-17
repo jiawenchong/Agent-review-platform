@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
+import { Mermaid } from '../components/Mermaid';
 import { uploadDocuments, type UploadedDocument } from '../api/client';
 
 const ACCEPT = '.pdf,.pptx,.docx,.txt,.md';
@@ -22,6 +23,7 @@ export function Upload() {
   const [results, setResults] = useState<UploadedDocument[]>([]);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [flowOpen, setFlowOpen] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = async (fileList: FileList | null) => {
@@ -145,13 +147,22 @@ export function Upload() {
                             {doc.llm_reasons.map((r, i) => <li key={i}>{r}</li>)}
                           </ul>
                         )}
-                        <button
-                          className="btn btn-outline"
-                          style={{ marginTop: 12 }}
-                          onClick={() => setExpanded(isOpen ? null : doc.document_id)}
-                        >
-                          {isOpen ? '收合擷取全文' : '查看擷取全文'}
-                        </button>
+                        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => setExpanded(isOpen ? null : doc.document_id)}
+                          >
+                            {isOpen ? '收合擷取全文' : '查看擷取全文'}
+                          </button>
+                          {doc.flowchart_mermaid && (
+                            <button
+                              className="btn btn-outline"
+                              onClick={() => setFlowOpen(flowOpen === doc.document_id ? null : doc.document_id)}
+                            >
+                              {flowOpen === doc.document_id ? '收合流程圖' : '查看自動生成流程圖'}
+                            </button>
+                          )}
+                        </div>
                         {isOpen && (
                           <pre
                             style={{
@@ -163,6 +174,19 @@ export function Upload() {
                           >
                             {doc.extracted_text}
                           </pre>
+                        )}
+                        {flowOpen === doc.document_id && doc.flowchart_mermaid && (
+                          <div
+                            style={{
+                              marginTop: 12, padding: '16px', background: 'var(--surface-alt)',
+                              border: '1px solid var(--border-subtle)', borderRadius: 10,
+                            }}
+                          >
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, fontFamily: 'var(--font-mono)' }}>
+                              生成模式:{doc.flowchart_mode === 'structured' ? '結構化解析' : '依章節推斷'}
+                            </div>
+                            <Mermaid chart={doc.flowchart_mermaid} />
+                          </div>
                         )}
                       </>
                     )}

@@ -134,6 +134,18 @@ class DocumentOut(ORMModel):
     llm_summary: str | None
     llm_key_points: list | None
     llm_reasons: list | None
+    flowchart_mermaid: str | None
+    flowchart_mode: str | None
+
+
+class FlowchartRequest(BaseModel):
+    text: str
+
+
+class FlowchartOut(BaseModel):
+    mermaid: str
+    mode: str
+    node_count: int
 
 
 class DocumentSummary(ORMModel):

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Document, DocumentStatus, GuardrailType
 from .extraction import ExtractionError, extract_text
+from .flowchart import generate_flowchart
 from .guardrails import record_event
 from .llm import llm
 
@@ -46,6 +47,12 @@ def ingest_file(db: Session, *, filename: str, data: bytes) -> Document:
     doc.llm_summary = review.summary
     doc.llm_key_points = review.key_points
     doc.llm_reasons = review.reasons
+
+    # 計畫流程圖生成 — auto-produce a Mermaid flowchart from the document.
+    flow = generate_flowchart(text)
+    doc.flowchart_mermaid = flow.mermaid
+    doc.flowchart_mode = flow.mode
+
     doc.status = DocumentStatus.DONE
 
     db.commit()
