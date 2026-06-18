@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import io
 
-import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from pptx import Presentation
+from pypdf import PdfReader
 
 
 class ExtractionError(Exception):
@@ -40,11 +40,8 @@ def detect_kind(filename: str) -> str | None:
 
 
 def _extract_pdf(data: bytes) -> str:
-    parts: list[str] = []
-    with fitz.open(stream=data, filetype="pdf") as doc:
-        for page in doc:
-            parts.append(page.get_text())
-    return "\n".join(parts)
+    reader = PdfReader(io.BytesIO(data))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
 def _extract_docx(data: bytes) -> str:
