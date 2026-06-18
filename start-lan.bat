@@ -12,33 +12,8 @@ rem Always work from the folder this script lives in (handles spaces in path).
 cd /d "%~dp0"
 
 echo ==========================================================
-echo  Agent Review Platform - LAN launcher
+echo  Agent Review Platform - LAN launcher (Python only)
 echo ==========================================================
-echo.
-echo Detecting your LAN IPv4 address...
-
-set "LAN_IP="
-set "IPFILE=%TEMP%\start-lan-ip.txt"
-powershell -NoProfile -Command "(Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -and $_.DefaultIPGateway } | ForEach-Object { $_.IPAddress } | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' } | Select-Object -First 1)" > "%IPFILE%" 2>nul
-if exist "%IPFILE%" set /p LAN_IP=<"%IPFILE%"
-del "%IPFILE%" >nul 2>nul
-
-if "%LAN_IP%"=="" (
-    echo.
-    echo Could not detect your LAN IP automatically.
-    echo Open a new cmd window, run:  ipconfig
-    echo and copy the "IPv4 Address" line ^(usually starts with 10. / 192.168. / 172.^).
-    echo.
-    set /p LAN_IP="Paste your IPv4 address here and press Enter: "
-)
-
-if "%LAN_IP%"=="" (
-    echo No IP provided. Aborting.
-    goto :end
-)
-
-echo.
-echo Using LAN IP: %LAN_IP%
 echo.
 
 if not exist "backend\app\main.py" (
@@ -48,23 +23,34 @@ if not exist "backend\app\main.py" (
     goto :end
 )
 
-echo Launching backend  ^(http://%LAN_IP%:8010^) ...
-start "Backend 8010" cmd /k "cd /d ""%~dp0backend"" && uvicorn app.main:app --reload --host 0.0.0.0 --port 8010"
+if not exist "dist\index.html" (
+    echo [Error] Cannot find dist\index.html (the built frontend).
+    echo You are probably on an older copy. Download the latest ZIP again
+    echo - it now ships the prebuilt frontend so no Node.js is needed.
+    goto :end
+)
 
-echo Launching frontend ^(http://%LAN_IP%:5173^) ...
-echo (first run installs frontend packages with npm install - may take a few minutes)
-start "Frontend 5173" cmd /k "cd /d ""%~dp0"" && if not exist node_modules npm install & set VITE_API_BASE=http://%LAN_IP%:8010 & npm run dev"
+echo Detecting your LAN IPv4 address...
+set "LAN_IP="
+set "IPFILE=%TEMP%\start-lan-ip.txt"
+powershell -NoProfile -Command "(Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -and $_.DefaultIPGateway } | ForEach-Object { $_.IPAddress } | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' } | Select-Object -First 1)" > "%IPFILE%" 2>nul
+if exist "%IPFILE%" set /p LAN_IP=<"%IPFILE%"
+del "%IPFILE%" >nul 2>nul
+if "%LAN_IP%"=="" set "LAN_IP=<your-ip>"
 
 echo.
 echo ==========================================================
-echo  Share this address with your colleagues:
-echo      http://%LAN_IP%:5173
+echo  Starting the server. Open these in a browser:
+echo    This PC:      http://localhost:8010
+echo    Colleagues:   http://%LAN_IP%:8010
 echo ==========================================================
 echo.
-echo IMPORTANT: wait until the FRONTEND window prints a line like
-echo    VITE ready ... Local: http://localhost:5173/
-echo before opening the address. First run may take a few minutes while
-echo npm install runs. If a window shows a red error, send me what it says.
+echo (Keep this window open - it runs the server. Close it to stop.)
+echo (If you see "uvicorn is not recognized", run: pip install -r backend\requirements.txt)
+echo.
+
+cd backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8010
 
 :end
 echo.

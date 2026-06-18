@@ -29,33 +29,35 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8010
 ```
 
-## 開放給公司內網同事使用
+## 開放給公司內網同事使用(只需要 Python,不需要 Node.js)
 
-預設只在本機(`localhost`)可連線。要讓同辦公室、同網段的同事連進來:
+repo 內已附上**預先編譯好的前端**(`dist/`),後端啟動時會直接把這份網頁一起送出去,
+所以**整個系統用一個 Python 服務、一個埠口(8010)就跑得起來**,主機端不需要安裝 Node.js。
 
-**Windows 一鍵啟動**:直接在 repo 根目錄雙擊 `start-lan.bat`(或在 cmd 執行),
-會自動偵測你的內網 IP、開兩個視窗分別跑後端 / 前端,並印出同事要打開的網址。
-偵測失敗時會請你手動貼上 `ipconfig` 查到的 IPv4 位址。
+**Windows 一鍵啟動**:在 repo 根目錄雙擊 `start-lan.bat`。它會:
 
-手動啟動的步驟如下:
+1. 自動偵測你的內網 IP
+2. 啟動後端服務(`uvicorn`,綁定 `0.0.0.0:8010`)
+3. 印出同事要打開的網址(例如 `http://10.10.51.118:8010`)
+
+視窗會一直開著跑服務,關掉視窗就停止。第一次跑前請先確定後端套件已安裝:
+`pip install -r backend\requirements.txt`。
+
+**手動啟動**(等同 bat 做的事):
 
 ```bash
-# 後端:綁定到所有網卡(0.0.0.0),而不只是 localhost
 cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8010
-
-# 前端:vite.config.ts 已設定 server.host = true,npm run dev 會自動
-# 印出可供同網段使用的「Network」網址(例如 http://192.168.1.23:5173)
-npm run dev
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-同事連到前端網址後,前端預設仍會打 `http://localhost:8010`(也就是同事自己機器的 8010,不是你的)。要讓他們連到你開的後端,啟動前端時指定:
+同事直接用瀏覽器打開 `http://<你的內網IP>:8010` 即可,網頁和 API 都從這一個位址出去
+(前端打包時用空的 `VITE_API_BASE`,所以一律走同源相對路徑,不管用哪個 IP 都對得上)。
 
-```bash
-VITE_API_BASE=http://<你的內網IP>:8010 npm run dev
-```
+後端的 CORS 設定已允許所有私有網段(`10.x` / `172.16-31.x` / `192.168.x`)的來源連線。
 
-後端的 CORS 設定已允許所有私有網段(`10.x` / `172.16-31.x` / `192.168.x`)的來源連線,不需要額外調整。
+> **開發者注意**:`dist/` 是 `npm run build` 的產物,已 commit 進 repo 方便無 Node 環境部署。
+> 改動前端原始碼後要重新 `npm run build` 才會反映到這個單一服務;開發時仍可照常用
+> `npm run dev`(見下方技術棧)享有熱更新。
 
 ⚠️ 目前沒有真正的登入驗證,只靠前端「目前身分(暫代登入)」切換器模擬身分(見下節)。開放給其他人連線前請注意:任何能連到這個網址的人都能任意切換身分、看到他人專案資料,僅適合可信的內網環境,不要開放到公開網際網路。
 
