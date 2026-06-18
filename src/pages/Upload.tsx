@@ -16,8 +16,8 @@ const FIELD_LABELS: Record<string, string> = {
   architecture: '系統架構',
 };
 
-const ACCEPT = '.pdf,.pptx,.docx,.txt,.md';
-const ACCEPT_LABEL = 'PDF · PPTX · DOCX';
+const ACCEPT = '.pptx,.docx,.txt,.md';
+const ACCEPT_LABEL = 'PPTX · DOCX · TXT';
 
 const VERDICT_STYLE: Record<string, { color: string; bg: string }> = {
   綠燈: { color: 'var(--green-text)', bg: 'var(--green-bg)' },

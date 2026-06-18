@@ -1,6 +1,6 @@
 """Document upload + ingestion (Upload page backend).
 
-Accepts one or many files of any supported type (PDF / DOCX / PPTX / TXT),
+Accepts one or many files of any supported type (DOCX / PPTX / TXT),
 extracts their text, and runs the LLM 判讀 (AI 評審中心) step. Auth is
 intentionally not enforced here — the Upload entry is the proposal intake
 point and is decoupled from the project ACL.

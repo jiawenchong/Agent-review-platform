@@ -163,7 +163,7 @@ class DocumentStatus(str, enum.Enum):
 
 
 class Document(Base):
-    """An uploaded source document (PDF / DOCX / PPTX …).
+    """An uploaded source document (DOCX / PPTX / TXT …).
 
     Holds the extracted text and the AI 評審中心 (LLM) interpretation. This is
     the ingestion record behind the Upload page.
@@ -173,7 +173,7 @@ class Document(Base):
 
     document_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     filename: Mapped[str] = mapped_column(String, nullable=False)
-    kind: Mapped[str | None] = mapped_column(String, nullable=True)  # pdf/docx/pptx/txt
+    kind: Mapped[str | None] = mapped_column(String, nullable=True)  # docx/pptx/txt
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     status: Mapped[DocumentStatus] = mapped_column(

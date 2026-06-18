@@ -46,6 +46,13 @@ pytest -q
 
 換成真實系統時,只需實作相同介面並在設定中指定,呼叫端無須改動。
 
+## 已知限制:PDF 上傳暫不支援
+
+`app/services/extraction.py` 目前只支援 PPTX/DOCX/TXT/MD。曾經試過 PyMuPDF
+(AGPL)與 pypdf(BSD)兩個 PDF 函式庫,皆被公司套件審核政策擋掉,看起來是任何
+新套件都要走審核流程,跟授權無關。要恢復 PDF 支援,需要先取得 IT 對某個 PDF
+函式庫的審核通過,或改寫成不需額外安裝套件的純標準庫解析器。
+
 ## 主要 API
 
 所有 API 需帶 `X-User-Id` 標頭(模擬登入主體,供 Information Isolation ACL 判斷)。
@@ -55,7 +62,7 @@ pytest -q
 | GET | `/api/health` | 健康檢查 + stub 狀態 |
 | GET | `/api/users` | 使用者清單(無需驗證;僅列出身分,供前端在真正登入完成前切換 `X-User-Id`) |
 | GET | `/api/uploads/supported` | 支援的檔案副檔名 |
-| POST | `/api/uploads` | 上傳多個檔案(PDF/PPTX/DOCX/TXT),抽取全文、交 LLM 判讀並自動生成流程圖 |
+| POST | `/api/uploads` | 上傳多個檔案(PPTX/DOCX/TXT,**不含 PDF** — 見下方說明),抽取全文、交 LLM 判讀並自動生成流程圖 |
 | GET | `/api/uploads` `/{id}` | 已上傳文件列表 / 單一文件(含擷取全文 + Mermaid 流程圖) |
 | POST | `/api/uploads/flowchart-preview` | 直接由文字生成 Mermaid 流程圖(不落地) |
 | POST | `/api/uploads/{id}/flowchart` | 重新生成某文件的流程圖 |
