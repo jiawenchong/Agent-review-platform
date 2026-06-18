@@ -5,13 +5,21 @@ described in the backend planning document into a runnable service. CORS is
 open to the Vite dev server so the existing React frontend can consume it,
 plus any private-network origin so colleagues on the same office LAN can
 reach a server started with --host 0.0.0.0 (see README for setup).
+
+If a built frontend exists at the repo-root ``dist/`` directory, it is served
+directly by this backend (single-port deployment). That lets the whole app run
+with just Python/uvicorn — no Node.js needed on the host — which is the
+supported way to share it on the office LAN when Node can't be installed.
 """
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import Base, SessionLocal, engine
@@ -79,3 +87,25 @@ def health() -> dict:
         "scan_interval_days": settings.scan_interval_days,
         "stall_threshold_days": settings.stall_threshold_days,
     }
+
+
+# Serve the built frontend (repo-root dist/) if present, so the app can run on
+# a single port with only Python. Registered last so /api/*, /docs, etc. win.
+# The built bundle is compiled with an empty VITE_API_BASE, so it calls the API
+# with same-origin relative URLs — it works at whatever host:port serves it.
+_FRONTEND_DIST = Path(__file__).resolve().parents[2] / "dist"
+if _FRONTEND_DIST.is_dir():
+    _assets_dir = _FRONTEND_DIST / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    _index_html = _FRONTEND_DIST / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str) -> FileResponse:
+        # Real files (favicon, etc.) are served directly; every other path
+        # falls back to index.html so client-side routing keeps working.
+        candidate = (_FRONTEND_DIST / full_path).resolve()
+        if full_path and candidate.is_file() and _FRONTEND_DIST in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(_index_html)
