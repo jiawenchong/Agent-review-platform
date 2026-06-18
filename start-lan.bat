@@ -52,7 +52,8 @@ echo Launching backend  ^(http://%LAN_IP%:8010^) ...
 start "Backend 8010" cmd /k "cd /d ""%~dp0backend"" && uvicorn app.main:app --reload --host 0.0.0.0 --port 8010"
 
 echo Launching frontend ^(http://%LAN_IP%:5173^) ...
-start "Frontend 5173" cmd /k "cd /d ""%~dp0"" && set VITE_API_BASE=http://%LAN_IP%:8010 && npm run dev"
+echo (first run installs frontend packages with npm install - may take a few minutes)
+start "Frontend 5173" cmd /k "cd /d ""%~dp0"" && if not exist node_modules npm install & set VITE_API_BASE=http://%LAN_IP%:8010 & npm run dev"
 
 echo.
 echo ==========================================================
@@ -60,7 +61,10 @@ echo  Share this address with your colleagues:
 echo      http://%LAN_IP%:5173
 echo ==========================================================
 echo.
-echo Two new windows opened (backend / frontend). Close them to stop the servers.
+echo IMPORTANT: wait until the FRONTEND window prints a line like
+echo    VITE ready ... Local: http://localhost:5173/
+echo before opening the address. First run may take a few minutes while
+echo npm install runs. If a window shows a red error, send me what it says.
 
 :end
 echo.
