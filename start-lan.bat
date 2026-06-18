@@ -3,7 +3,11 @@ setlocal
 
 echo Detecting your LAN IPv4 address...
 set "LAN_IP="
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "try { $idx = (Get-NetRoute -DestinationPrefix 0.0.0.0/0 -ErrorAction Stop | Sort-Object -Property RouteMetric | Select-Object -First 1 -ExpandProperty InterfaceIndex); (Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction Stop | Select-Object -First 1 -ExpandProperty IPAddress) } catch { '' }"`) do set "LAN_IP=%%i"
+set "IPFILE=%TEMP%\start-lan-ip.txt"
+type nul > "%IPFILE%"
+powershell -NoProfile -Command "try { $idx = (Get-NetRoute -DestinationPrefix 0.0.0.0/0 -ErrorAction Stop | Sort-Object -Property RouteMetric | Select-Object -First 1 -ExpandProperty InterfaceIndex); (Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction Stop | Select-Object -First 1 -ExpandProperty IPAddress) } catch { '' }" > "%IPFILE%" 2>nul
+set /p LAN_IP=<"%IPFILE%"
+del "%IPFILE%" >nul 2>nul
 
 if "%LAN_IP%"=="" (
     echo.
