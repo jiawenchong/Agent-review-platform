@@ -6,7 +6,7 @@ pydantic-settings>=2.3
 apscheduler>=3.10
 python-multipart>=0.0.9
 # document text extraction (upload ingestion)
-pypdf>=4.0
+# PDF intentionally excluded — see app/services/extraction.py docstring
 python-docx>=1.1
 python-pptx>=0.6
 # dev / test

@@ -1,8 +1,14 @@
 """Document text extraction.
 
-Accepts PDF / DOCX / PPTX (and plain text) and pulls all readable text out,
+Accepts DOCX / PPTX (and plain text) and pulls all readable text out,
 regardless of type. Used by the upload ingestion endpoint as the first stage
 before the LLM "判讀" (AI 評審中心) step.
+
+PDF is intentionally not supported: every PDF-parsing library tried so far
+(PyMuPDF, pypdf) got blocked by the company's package-approval policy, which
+applies to any new dependency regardless of license. Re-add PDF support once
+a library has been approved, or implement a pure-stdlib parser if that
+approval never comes.
 
 Per the Capability guardrail (§八), a parse failure must surface as an
 explicit "無法取得資料" rather than fabricated content — so callers treat an
@@ -14,7 +20,6 @@ import io
 
 from docx import Document as DocxDocument
 from pptx import Presentation
-from pypdf import PdfReader
 
 
 class ExtractionError(Exception):
@@ -23,7 +28,6 @@ class ExtractionError(Exception):
 
 # extension → canonical kind
 SUPPORTED = {
-    ".pdf": "pdf",
     ".docx": "docx",
     ".pptx": "pptx",
     ".txt": "txt",
@@ -37,11 +41,6 @@ def detect_kind(filename: str) -> str | None:
         if lower.endswith(ext):
             return kind
     return None
-
-
-def _extract_pdf(data: bytes) -> str:
-    reader = PdfReader(io.BytesIO(data))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
 def _extract_docx(data: bytes) -> str:
@@ -77,9 +76,7 @@ def extract_text(filename: str, data: bytes) -> tuple[str, str]:
     if not data:
         raise ExtractionError("檔案內容為空,無法解析。")
     try:
-        if kind == "pdf":
-            text = _extract_pdf(data)
-        elif kind == "docx":
+        if kind == "docx":
             text = _extract_docx(data)
         elif kind == "pptx":
             text = _extract_pptx(data)
