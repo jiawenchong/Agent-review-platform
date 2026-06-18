@@ -33,6 +33,12 @@ uvicorn app.main:app --reload --port 8010
 
 預設只在本機(`localhost`)可連線。要讓同辦公室、同網段的同事連進來:
 
+**Windows 一鍵啟動**:直接在 repo 根目錄雙擊 `start-lan.bat`(或在 cmd 執行),
+會自動偵測你的內網 IP、開兩個視窗分別跑後端 / 前端,並印出同事要打開的網址。
+偵測失敗時會請你手動貼上 `ipconfig` 查到的 IPv4 位址。
+
+手動啟動的步驟如下:
+
 ```bash
 # 後端:綁定到所有網卡(0.0.0.0),而不只是 localhost
 cd backend
