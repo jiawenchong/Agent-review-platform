@@ -143,6 +143,55 @@ def test_chat_builds_skill_compliant_request(monkeypatch):
     assert isinstance(content, list) and content[0]["type"] == "text"  # 規則 3
 
 
+def test_profetai_evaluate_appeal_success(monkeypatch):
+    client = ProphetAILLM()
+    monkeypatch.setattr(
+        client, "_chat", lambda **kw: '{"reasonable": true, "reason": "已提出補件時程"}'
+    )
+    ev = client.evaluate_appeal(
+        project_id="PROJ-1",
+        appeal_text="下週內補齊文件,負責人 Alice",
+        progress_value=80.0,
+        claims_on_track=False,
+        rag_context=[],
+    )
+    assert ev.reasonable is True
+    assert "補件" in ev.reason
+
+
+def test_profetai_evaluate_appeal_contradiction_forces_unreasonable(monkeypatch):
+    """Even if the LLM says reasonable, a data contradiction overrides to False."""
+    client = ProphetAILLM()
+    monkeypatch.setattr(client, "_chat", lambda **kw: '{"reasonable": true, "reason": "ok"}')
+    ev = client.evaluate_appeal(
+        project_id="PROJ-1",
+        appeal_text="進度一切如期正常",
+        progress_value=20.0,        # KANBAN 落後 → 與「如期」矛盾
+        claims_on_track=True,
+        rag_context=[],
+    )
+    assert ev.reasonable is False
+    assert ev.contradiction_with_data is True
+
+
+def test_profetai_evaluate_appeal_falls_back_to_stub(monkeypatch):
+    """LLM down → degrade to the deterministic rule so the weekly scan survives."""
+    client = ProphetAILLM()
+
+    def _boom(**kw):
+        raise LLMUnavailable("api down")
+
+    monkeypatch.setattr(client, "_chat", _boom)
+    ev = client.evaluate_appeal(
+        project_id="PROJ-1",
+        appeal_text="預計下週完成第三階段里程碑,並由負責人補齊驗收文件與時程。",  # stub 規則會判為合理
+        progress_value=80.0,
+        claims_on_track=False,
+        rag_context=[],
+    )
+    assert ev.reasonable is True  # came from the stub fallback, not a crash
+
+
 def test_using_stub_llm_toggles_with_credentials(monkeypatch):
     monkeypatch.delenv("COMPANY_LLM_API_KEY", raising=False)
     monkeypatch.delenv("COMPANY_LLM_AGENT", raising=False)

@@ -87,8 +87,15 @@ set COMPANY_LLM_AGENT=<agent id>        REM 審核 agent 的 id(放在 model 欄
   **不會捏造**綠燈/紅燈結論,也不會自動建立專案(可稍後重試;常見錯誤排查見 skill)。
 - 端點預設為 `https://10.10.23.120:4231/...`(可用 `APP_LLM_ENDPOINT` 覆寫);逾時預設 180 秒(`APP_LLM_TIMEOUT_SECONDS`)。
 
-**審核用的 prompt** 放在 [`backend/app/prompts/document_review.md`](./backend/app/prompts/document_review.md)
-(單一來源:後端 connector 載入並切成 system/user 後**內嵌**送出;你也可以直接把它貼進 ProphetAI 後台該 agent 的設定)。
+**兩個 LLM 判讀步驟、兩份 prompt**(都在 [`backend/app/prompts/`](./backend/app/prompts/),單一來源:connector 載入切 system/user 後**內嵌**送出,也可直接貼進 ProphetAI 後台對應 agent):
+
+| 用途 | prompt 檔 | 結論 | 時機 |
+| --- | --- | --- | --- |
+| 文件審核(AI 評審中心) | [`document_review.md`](./backend/app/prompts/document_review.md) | 綠燈 / 紅燈 / 待補件 | 上傳規劃書時 |
+| 申訴合理性(closed-loop) | [`appeal_reasonableness.md`](./backend/app/prompts/appeal_reasonableness.md) | 合理 / 不合理 | 專案停滯、負責人申訴後 |
+
+兩者都吃同一組 ProphetAI 設定(`COMPANY_LLM_API_KEY` / `COMPANY_LLM_AGENT`)。差別在失效行為:
+文件審核失效 → 標「無法審核」;申訴判讀失效 → **退回規則 stub**(每週巡查是背景自動流程,不能因 LLM 掛掉而中斷)。
 
 ## 技術棧
 

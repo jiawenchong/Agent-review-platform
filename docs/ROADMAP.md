@@ -46,7 +46,7 @@
 | B2 | 每 7 天 Cron 巡查(APScheduler) | ✅ |
 | B3 | 14 天停滯判斷(規則) | ✅ |
 | B4 | Decision Flow 四級分流 | ✅ |
-| B5 | Reasoning:LLM 判斷申訴合理性(stub) | ✅ |
+| B5 | Reasoning:LLM 判斷申訴合理性 | ✅ 已接 ProphetAI(同 A8 設定);LLM 失效時退回規則 stub,巡查不中斷。數據矛盾仍由規則強制判不合理 |
 | B6 | Feedback:下輪驗證 + 回寫 RAG | ✅ |
 | B7 | Escalation:連續≥2輪升級 + 停用自動核准 | ✅ |
 | B8 | KANBAN 真實連接器 | ❌ 需 API |
