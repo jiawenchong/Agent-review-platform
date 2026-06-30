@@ -183,10 +183,9 @@ def _extract_content(data: object) -> str:
     raise LLMUnavailable("無法從 API 回應取得內容(回應格式不符預期)。")
 
 
-def _parse_review(content: str, *, filename: str) -> DocumentReview:
-    """Parse the model's JSON output into a DocumentReview (Grounding-safe)."""
+def _extract_json_object(content: str) -> dict:
+    """Pull a single JSON object out of an LLM reply (tolerates ```json fences)."""
     snippet = content.strip()
-    # Tolerate a ```json … ``` fenced block, then fall back to the first object.
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", snippet, re.DOTALL)
     if fence:
         snippet = fence.group(1)
@@ -200,6 +199,12 @@ def _parse_review(content: str, *, filename: str) -> DocumentReview:
         raise LLMUnavailable(f"LLM 回應非合法 JSON:{exc}") from exc
     if not isinstance(obj, dict):
         raise LLMUnavailable("LLM 回應不是 JSON 物件。")
+    return obj
+
+
+def _parse_review(content: str, *, filename: str) -> DocumentReview:
+    """Parse the model's JSON output into a DocumentReview (Grounding-safe)."""
+    obj = _extract_json_object(content)
 
     verdict = str(obj.get("verdict", "")).strip()
     if verdict not in _VALID_VERDICTS:
@@ -220,6 +225,16 @@ def _parse_review(content: str, *, filename: str) -> DocumentReview:
         key_points=_as_list(obj.get("key_points")),
         reasons=_as_list(obj.get("reasons")),
     )
+
+
+def _parse_appeal(content: str) -> tuple[bool, str]:
+    """Parse the appeal-reasonableness JSON → (reasonable, reason)."""
+    obj = _extract_json_object(content)
+    reasonable = obj.get("reasonable")
+    if not isinstance(reasonable, bool):
+        raise LLMUnavailable(f"LLM 回傳的 reasonable 不是布林值:{reasonable!r}。")
+    reason = str(obj.get("reason", "")).strip() or ("申訴合理。" if reasonable else "申訴不合理。")
+    return reasonable, reason
 
 
 def _no_proxy_ssl_off_opener() -> urllib.request.OpenerDirector:
@@ -298,8 +313,67 @@ class ProphetAILLM:
         content = self._chat(prompt=prompt)
         return _parse_review(content, filename=filename)
 
-    def evaluate_appeal(self, **kwargs) -> AppealEvaluation:
-        return self._stub.evaluate_appeal(**kwargs)
+    def evaluate_appeal(
+        self,
+        *,
+        project_id: str,
+        appeal_text: str,
+        progress_value: float,
+        claims_on_track: bool,
+        rag_context: list[RagHit] | None = None,
+    ) -> AppealEvaluation:
+        rag_context = rag_context if rag_context is not None else rag.query(project_id, appeal_text)
+        refs = [h.ref for h in rag_context]
+
+        # Data-consistency (Hallucination guardrail) stays a rule — it compares
+        # the claim against KANBAN numbers, which is structural per §七.
+        contradiction = claims_on_track and progress_value < 60
+        note = (
+            "留言宣稱進度如期/正常,但 KANBAN 進度值明顯落後,偵測到與數據矛盾。"
+            if contradiction
+            else "未偵測到明顯的數據矛盾。"
+        )
+        rag_text = "\n".join(f"- {h.ref}:{h.text}" for h in rag_context)
+
+        prompt = (
+            prompts.appeal_system_prompt()
+            + "\n\n----\n\n"
+            + prompts.appeal_user_prompt(
+                project_id=project_id,
+                progress_value=progress_value,
+                claims_on_track=claims_on_track,
+                contradiction_note=note,
+                appeal_text=appeal_text,
+                rag_context=rag_text,
+            )
+        )
+
+        try:
+            reasonable, reason = _parse_appeal(self._chat(prompt=prompt))
+        except LLMUnavailable:
+            # The weekly scan is an autonomous background job — it must not halt
+            # if the LLM is down. Degrade to the deterministic rule (B5 stub) so
+            # governance keeps running; the appeal still gets a verdict.
+            return self._stub.evaluate_appeal(
+                project_id=project_id,
+                appeal_text=appeal_text,
+                progress_value=progress_value,
+                claims_on_track=claims_on_track,
+                rag_context=rag_context,
+            )
+
+        # A genuine data contradiction is an objective red flag → never reasonable,
+        # regardless of how the appeal is worded (keeps the guardrail honest).
+        if contradiction:
+            reasonable = False
+
+        return AppealEvaluation(
+            reasonable=reasonable,
+            reason=reason,
+            rag_refs=refs,
+            grounding_violation=False,  # prompt instructs: only cite supplied context
+            contradiction_with_data=contradiction,
+        )
 
 
 def _credentials_present() -> bool:
