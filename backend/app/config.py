@@ -26,12 +26,12 @@ class Settings(BaseSettings):
 
     # --- external connectors (待確認 — stubbed by default) ---
     kanban_base_url: str = ""            # 空字串 → 使用內建 stub
-    # ProfetAI LLM 審核 API。llm_endpoint 為空 → 退回 StubLLM(規則判讀,免 GPU)。
-    # 內網免驗證,llm_api_key 留空即可;之後若 API 需要金鑰再填(會帶 Bearer header)。
-    llm_endpoint: str = ""               # 例:http://<intranet-host>/profetai-api
-    llm_model: str = ""                  # 選填:要呼叫的模型名稱(OpenAI 相容 payload 用)
-    llm_api_key: str = ""                # 選填:有值才帶 Authorization: Bearer
-    llm_timeout_seconds: float = 30.0    # API 逾時(秒)→ 視為失效 → 無法審核
+    # ProphetAI 線上審核 API(見 .claude/skills/prophetai-api)。OpenAI 相容端點。
+    # 金鑰 / agent id 不放這裡,改由 host 本機環境變數帶入(勿 commit):
+    #   COMPANY_LLM_API_KEY = ask_xxxx     COMPANY_LLM_AGENT = <agent id>
+    # 兩者都有值 → 啟用真實審核;否則退回 StubLLM(規則判讀,免 GPU)。
+    llm_endpoint: str = "https://10.10.23.120:4231/public/kits/openai/v1/chat/completions"
+    llm_timeout_seconds: float = 180.0   # API 逾時(秒)→ 視為失效 → 無法審核
     rag_backend: str = "memory"          # memory | pgvector | faiss
     notification_channel: str = "inapp"  # inapp | email | teams
 

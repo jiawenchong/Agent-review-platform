@@ -1,15 +1,19 @@
 """LLM connector — the Reasoning engine (§六, §七).
 
-Two implementations behind one interface, selected by ``settings.llm_endpoint``:
+Two implementations behind one interface:
 
-* :class:`ProfetAILLM` — calls the real ProfetAI LLM API over HTTP for the
-  document 審核 (AI 評審中心) step. Used when ``APP_LLM_ENDPOINT`` is set.
+* :class:`ProphetAILLM` — calls the company's online ProphetAI API (OpenAI
+  compatible ``/v1/chat/completions``) for the document 審核 (AI 評審中心) step.
+  Used when both ``COMPANY_LLM_API_KEY`` and ``COMPANY_LLM_AGENT`` are set in
+  the host environment. The call follows the verified pattern in
+  ``.claude/skills/prophetai-api`` (urllib, block-array content, Bearer auth,
+  SSL verification off for the intranet self-signed cert, no outbound proxy).
 * :class:`StubLLM` — a transparent, auditable heuristic that runs without a
-  GPU. Used when no endpoint is configured (local dev / demo).
+  GPU. Used when those credentials are absent (local dev / demo).
 
 The closed-loop appeal-reasonableness judgement (§七 evaluate_appeal) stays on
 the deterministic stub for now (ROADMAP B5); only the document review is wired
-to ProfetAI. A real connector for appeals would implement the same contract.
+to ProphetAI. A real connector for appeals would implement the same contract.
 
 If the real API is configured but unreachable / returns garbage, the connector
 raises :class:`LLMUnavailable`. Callers must treat that as "無法審核" per the
@@ -18,14 +22,21 @@ Capability guardrail — never silently fabricate a verdict.
 from __future__ import annotations
 
 import json
+import os
 import re
+import ssl
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
-
-import httpx
 
 from ..config import settings
 from . import prompts
 from .connectors import RagHit, rag
+
+# Host-only credentials (see .claude/skills/prophetai-api). Never committed:
+# the repo leaves these empty and the host machine fills them via env vars.
+_ENV_API_KEY = "COMPANY_LLM_API_KEY"   # ask_xxxx
+_ENV_AGENT_ID = "COMPANY_LLM_AGENT"    # ProphetAI agent id → goes in the `model` field
 
 
 class LLMUnavailable(Exception):
@@ -135,12 +146,21 @@ class StubLLM:
         )
 
 
-def _extract_content(data: object) -> str:
-    """Pull the assistant text out of an LLM API response.
+def _content_to_text(content: object) -> str | None:
+    """Normalise an OpenAI ``message.content`` that may be a block array."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):  # block array → join the text blocks
+        return "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return None
 
-    Defaults to the OpenAI-compatible shape (``choices[0].message.content``),
-    with fallbacks for a few common custom shapes. The real ProfetAI spec can
-    be matched precisely here once provided.
+
+def _extract_content(data: object) -> str:
+    """Pull the assistant text out of a ProphetAI / OpenAI-compatible response.
+
+    The endpoint is OpenAI compatible (``choices[0].message.content``); content
+    may come back as a plain string or as a block array (see prophetai-api
+    skill). A few custom shapes are tolerated as fallbacks.
     """
     if isinstance(data, str):
         return data
@@ -150,13 +170,16 @@ def _extract_content(data: object) -> str:
             first = choices[0]
             if isinstance(first, dict):
                 msg = first.get("message")
-                if isinstance(msg, dict) and isinstance(msg.get("content"), str):
-                    return msg["content"]
+                if isinstance(msg, dict):
+                    text = _content_to_text(msg.get("content"))
+                    if text is not None:
+                        return text
                 if isinstance(first.get("text"), str):
                     return first["text"]
         for key in ("content", "output", "text", "result", "answer"):
-            if isinstance(data.get(key), str):
-                return data[key]
+            text = _content_to_text(data.get(key))
+            if text is not None:
+                return text
     raise LLMUnavailable("無法從 API 回應取得內容(回應格式不符預期)。")
 
 
@@ -199,61 +222,96 @@ def _parse_review(content: str, *, filename: str) -> DocumentReview:
     )
 
 
-class ProfetAILLM:
-    """Calls the ProfetAI LLM API for document review (AI 評審中心).
+def _no_proxy_ssl_off_opener() -> urllib.request.OpenerDirector:
+    """Opener that skips the outbound proxy and the self-signed cert check.
 
-    Internal network → no auth by default. Payload defaults to the
-    OpenAI-compatible chat-completions shape; when the real ProfetAI spec is
-    provided it can be adjusted in :meth:`_chat` / :func:`_extract_content`.
+    Both are mandatory for the intranet endpoint (see prophetai-api skill):
+    the company proxy blocks CONNECT (→ 403) and the cert is self-signed.
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=ctx),
+    )
+
+
+class ProphetAILLM:
+    """Calls the company ProphetAI API for document review (AI 評審中心).
+
+    Follows the verified pattern in ``.claude/skills/prophetai-api``:
+    OpenAI-compatible endpoint, ``model`` = agent id, ``content`` as a block
+    array, Bearer auth, SSL verification off, no outbound proxy. The review
+    prompt is sent inline (system + user combined into one text block) so the
+    call works regardless of whether the agent has a prompt configured.
     """
 
     def __init__(self) -> None:
         self._stub = StubLLM()  # appeals still use the deterministic stub (B5)
 
-    def _chat(self, *, system: str, user: str) -> str:
-        payload: dict = {
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": 0,
-            "stream": False,
-        }
-        if settings.llm_model:
-            payload["model"] = settings.llm_model
-        headers: dict[str, str] = {}
-        if settings.llm_api_key:  # internal network is no-auth; honoured only if set
-            headers["Authorization"] = f"Bearer {settings.llm_api_key}"
-        try:
-            resp = httpx.post(
-                settings.llm_endpoint,
-                json=payload,
-                headers=headers,
-                timeout=settings.llm_timeout_seconds,
+    def _chat(self, *, prompt: str) -> str:
+        api_key = os.environ.get(_ENV_API_KEY, "")
+        agent_id = os.environ.get(_ENV_AGENT_ID, "")
+        if not api_key or not agent_id:
+            raise LLMUnavailable(
+                f"{_ENV_API_KEY} / {_ENV_AGENT_ID} 未設定(請在 host 本機環境變數填入,勿 commit)。"
             )
-            resp.raise_for_status()
-            data = resp.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise LLMUnavailable(f"呼叫 ProfetAI API 失敗:{exc}") from exc
+
+        payload = json.dumps(
+            {
+                "model": agent_id,  # 規則 2:model 欄位 = agent id
+                "messages": [
+                    {"role": "user", "content": [{"type": "text", "text": prompt}]}  # 規則 3:block 陣列
+                ],
+                "temperature": 0,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+        req = urllib.request.Request(
+            settings.llm_endpoint,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",  # 規則 4
+            },
+        )
+        opener = _no_proxy_ssl_off_opener()  # 規則 5
+        try:
+            with opener.open(req, timeout=settings.llm_timeout_seconds) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode(errors="replace")[:200]
+            raise LLMUnavailable(f"ProphetAI API 回應錯誤 {exc.code}:{body}") from exc
+        except (urllib.error.URLError, ValueError, OSError) as exc:
+            raise LLMUnavailable(f"無法連線 ProphetAI API:{exc}") from exc
         return _extract_content(data)
 
     def review_document(self, *, filename: str, text: str) -> DocumentReview:
-        content = self._chat(
-            system=prompts.review_system_prompt(),
-            user=prompts.review_user_prompt(filename=filename, markdown=text),
+        # Inline prompt (SEND_PROMPT_INLINE): system + user in one text block.
+        prompt = (
+            prompts.review_system_prompt()
+            + "\n\n----\n\n"
+            + prompts.review_user_prompt(filename=filename, markdown=text)
         )
+        content = self._chat(prompt=prompt)
         return _parse_review(content, filename=filename)
 
     def evaluate_appeal(self, **kwargs) -> AppealEvaluation:
         return self._stub.evaluate_appeal(**kwargs)
 
 
-def _build_llm() -> StubLLM | ProfetAILLM:
-    return ProfetAILLM() if settings.llm_endpoint else StubLLM()
+def _credentials_present() -> bool:
+    return bool(os.environ.get(_ENV_API_KEY) and os.environ.get(_ENV_AGENT_ID))
+
+
+def _build_llm() -> StubLLM | ProphetAILLM:
+    return ProphetAILLM() if _credentials_present() else StubLLM()
 
 
 llm = _build_llm()
 
 
 def using_stub_llm() -> bool:
-    return not settings.llm_endpoint
+    return not _credentials_present()
