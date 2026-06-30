@@ -31,7 +31,7 @@
 | A5 | 規劃書範本/格式 | ✅ |
 | A6 | 結構化欄位抽取(規劃書→專案欄位) | ✅ |
 | A7 | 解析完成 → 自動建立專案(綠燈才建)+ 上傳頁確認(含儀表板 highlight) | ✅ |
-| A8 | 真實 LLM 審核(ProfetAI API)取代 stub | ⚠️ connector 已接,設 `APP_LLM_ENDPOINT` 即啟用;未設則退回 stub。失效時標示「無法審核」(Capability 紅線),不捏造結論 |
+| A8 | 真實 LLM 審核(公司 ProphetAI API)取代 stub | ⚠️ connector 已接(照 `.claude/skills/prophetai-api`:agent id 當 model、block 陣列、Bearer、關 SSL、不走 proxy);host 設 `COMPANY_LLM_API_KEY`+`COMPANY_LLM_AGENT` 即啟用,未設則退回 stub。失效時標示「無法審核」(Capability 紅線),不捏造結論 |
 | A9 | 上傳文件先轉 Markdown 再餵 LLM(保留標題/表格/投影片結構) | ✅ |
 
 > **PDF 上傳暫不支援**:PyMuPDF(AGPL)與 pypdf(BSD)都被公司套件審核政策擋掉,

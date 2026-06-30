@@ -2,19 +2,22 @@
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 from docx import Document as DocxDocument
 
 from app.models import DocumentStatus, GuardrailEvent, GuardrailType
-from app.services import ingestion
+from app.services import ingestion, llm as llm_module
 from app.services.extraction import extract_text
 from app.services.llm import (
     DocumentReview,
     LLMUnavailable,
-    ProfetAILLM,
+    ProphetAILLM,
+    _credentials_present,
     _extract_content,
     _parse_review,
+    using_stub_llm,
 )
 
 
@@ -71,11 +74,11 @@ def test_parse_review_rejects_non_json():
         _parse_review("the document looks fine to me", filename="x.docx")
 
 
-# ── ProfetAILLM (monkeypatched transport) ─────────────────────────────────
+# ── ProphetAILLM (monkeypatched transport) ─────────────────────────────────
 
 
 def test_profetai_review_document_success(monkeypatch):
-    client = ProfetAILLM()
+    client = ProphetAILLM()
     monkeypatch.setattr(
         client,
         "_chat",
@@ -87,7 +90,7 @@ def test_profetai_review_document_success(monkeypatch):
 
 
 def test_profetai_review_document_unavailable_propagates(monkeypatch):
-    client = ProfetAILLM()
+    client = ProphetAILLM()
 
     def _boom(**kw):
         raise LLMUnavailable("connection refused")
@@ -95,6 +98,59 @@ def test_profetai_review_document_unavailable_propagates(monkeypatch):
     monkeypatch.setattr(client, "_chat", _boom)
     with pytest.raises(LLMUnavailable):
         client.review_document(filename="p.docx", text="x")
+
+
+def test_chat_requires_host_credentials(monkeypatch):
+    monkeypatch.delenv("COMPANY_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("COMPANY_LLM_AGENT", raising=False)
+    with pytest.raises(LLMUnavailable):
+        ProphetAILLM()._chat(prompt="hi")
+
+
+def test_chat_builds_skill_compliant_request(monkeypatch):
+    """model = agent id, content = block array, Bearer header (prophetai-api)."""
+    monkeypatch.setenv("COMPANY_LLM_API_KEY", "ask_test123")
+    monkeypatch.setenv("COMPANY_LLM_AGENT", "agent-xyz")
+
+    captured = {}
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {"choices": [{"message": {"content": '{"verdict":"綠燈","summary":"ok"}'}}]}
+            ).encode()
+
+    class _FakeOpener:
+        def open(self, req, timeout=None):
+            captured["url"] = req.full_url
+            captured["auth"] = req.headers.get("Authorization")
+            captured["body"] = json.loads(req.data)
+            return _FakeResp()
+
+    monkeypatch.setattr(llm_module, "_no_proxy_ssl_off_opener", lambda: _FakeOpener())
+
+    review = ProphetAILLM().review_document(filename="p.docx", text="# 目標")
+    assert review.verdict == "綠燈"
+    assert captured["auth"] == "Bearer ask_test123"
+    assert captured["body"]["model"] == "agent-xyz"            # 規則 2
+    content = captured["body"]["messages"][0]["content"]
+    assert isinstance(content, list) and content[0]["type"] == "text"  # 規則 3
+
+
+def test_using_stub_llm_toggles_with_credentials(monkeypatch):
+    monkeypatch.delenv("COMPANY_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("COMPANY_LLM_AGENT", raising=False)
+    assert using_stub_llm() is True
+    monkeypatch.setenv("COMPANY_LLM_API_KEY", "ask_x")
+    monkeypatch.setenv("COMPANY_LLM_AGENT", "agent-x")
+    assert _credentials_present() is True
+    assert using_stub_llm() is False
 
 
 # ── ingestion: LLM failure → 無法審核 + Capability guardrail ───────────────
