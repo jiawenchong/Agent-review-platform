@@ -38,6 +38,11 @@
   --olive-bg: #edf0e8;
   --olive-border: rgba(101, 109, 74, 0.2);
 
+  /* 中性灰 — 用於「無法審核」等非結論狀態 */
+  --gray-text: #5a5f57;
+  --gray-bg: #eceee9;
+  --gray-border: rgba(90, 95, 87, 0.22);
+
   --font-serif: 'Source Serif 4', 'Noto Serif TC', serif;
   --font-sans: 'Inter', 'Noto Sans TC', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
