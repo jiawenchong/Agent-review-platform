@@ -1,20 +1,35 @@
 """LLM connector — the Reasoning engine (§六, §七).
 
-Per the LLM-vs-rule division table, the LLM is used only for the one
-judgement rules cannot make: whether a free-text appeal is *reasonable and
-feasible*. Everything structural stays in Python.
+Two implementations behind one interface, selected by ``settings.llm_endpoint``:
 
-The stub implements a transparent, auditable heuristic so the closed loop
-and the Grounding / Hallucination guardrails can run deterministically
-without a GPU. A real connector (Llama3 / GPT4o on a local GPU) would
-implement the same ``evaluate_appeal`` contract.
+* :class:`ProfetAILLM` — calls the real ProfetAI LLM API over HTTP for the
+  document 審核 (AI 評審中心) step. Used when ``APP_LLM_ENDPOINT`` is set.
+* :class:`StubLLM` — a transparent, auditable heuristic that runs without a
+  GPU. Used when no endpoint is configured (local dev / demo).
+
+The closed-loop appeal-reasonableness judgement (§七 evaluate_appeal) stays on
+the deterministic stub for now (ROADMAP B5); only the document review is wired
+to ProfetAI. A real connector for appeals would implement the same contract.
+
+If the real API is configured but unreachable / returns garbage, the connector
+raises :class:`LLMUnavailable`. Callers must treat that as "無法審核" per the
+Capability guardrail — never silently fabricate a verdict.
 """
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 
+import httpx
+
 from ..config import settings
+from . import prompts
 from .connectors import RagHit, rag
+
+
+class LLMUnavailable(Exception):
+    """Raised when the real LLM API cannot produce a usable review."""
 
 
 @dataclass
@@ -42,9 +57,10 @@ _VAGUE_MARKERS = ("再看看", "應該會好", "盡量", "再說", "沒問題啦
 # Concreteness signals: a credible appeal names a plan, date, or owner action.
 _CONCRETE_MARKERS = ("預計", "已完成", "里程碑", "時程", "補件", "排程", "負責", "日前", "週內", "驗證")
 
-
 # Structured-proposal sections the AI 評審中心 expects in a planning doc.
 _EXPECTED_SECTIONS = ("目標", "範圍", "時程", "風險", "資源", "里程碑")
+
+_VALID_VERDICTS = ("綠燈", "紅燈", "待補件")
 
 
 class StubLLM:
@@ -54,7 +70,7 @@ class StubLLM:
         The stub gives a transparent, auditable read: it summarises the
         content, pulls out the leading lines as key points, and decides a
         紅燈/綠燈/待補件 verdict from how complete the structured proposal is.
-        A real Llama3/GPT4o connector implements the same contract.
+        A real ProfetAI connector implements the same contract.
         """
         clean = text.strip()
         lines = [ln.strip() for ln in clean.splitlines() if ln.strip()]
@@ -119,7 +135,124 @@ class StubLLM:
         )
 
 
-llm = StubLLM()
+def _extract_content(data: object) -> str:
+    """Pull the assistant text out of an LLM API response.
+
+    Defaults to the OpenAI-compatible shape (``choices[0].message.content``),
+    with fallbacks for a few common custom shapes. The real ProfetAI spec can
+    be matched precisely here once provided.
+    """
+    if isinstance(data, str):
+        return data
+    if isinstance(data, dict):
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                msg = first.get("message")
+                if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+                    return msg["content"]
+                if isinstance(first.get("text"), str):
+                    return first["text"]
+        for key in ("content", "output", "text", "result", "answer"):
+            if isinstance(data.get(key), str):
+                return data[key]
+    raise LLMUnavailable("無法從 API 回應取得內容(回應格式不符預期)。")
+
+
+def _parse_review(content: str, *, filename: str) -> DocumentReview:
+    """Parse the model's JSON output into a DocumentReview (Grounding-safe)."""
+    snippet = content.strip()
+    # Tolerate a ```json … ``` fenced block, then fall back to the first object.
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", snippet, re.DOTALL)
+    if fence:
+        snippet = fence.group(1)
+    else:
+        brace = re.search(r"\{.*\}", snippet, re.DOTALL)
+        if brace:
+            snippet = brace.group(0)
+    try:
+        obj = json.loads(snippet)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise LLMUnavailable(f"LLM 回應非合法 JSON:{exc}") from exc
+    if not isinstance(obj, dict):
+        raise LLMUnavailable("LLM 回應不是 JSON 物件。")
+
+    verdict = str(obj.get("verdict", "")).strip()
+    if verdict not in _VALID_VERDICTS:
+        raise LLMUnavailable(f"LLM 回傳未知的 verdict:{verdict!r}。")
+
+    summary = str(obj.get("summary", "")).strip() or f"文件《{filename}》評審結果:{verdict}。"
+
+    def _as_list(value: object) -> list[str]:
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
+    return DocumentReview(
+        verdict=verdict,
+        summary=summary,
+        key_points=_as_list(obj.get("key_points")),
+        reasons=_as_list(obj.get("reasons")),
+    )
+
+
+class ProfetAILLM:
+    """Calls the ProfetAI LLM API for document review (AI 評審中心).
+
+    Internal network → no auth by default. Payload defaults to the
+    OpenAI-compatible chat-completions shape; when the real ProfetAI spec is
+    provided it can be adjusted in :meth:`_chat` / :func:`_extract_content`.
+    """
+
+    def __init__(self) -> None:
+        self._stub = StubLLM()  # appeals still use the deterministic stub (B5)
+
+    def _chat(self, *, system: str, user: str) -> str:
+        payload: dict = {
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0,
+            "stream": False,
+        }
+        if settings.llm_model:
+            payload["model"] = settings.llm_model
+        headers: dict[str, str] = {}
+        if settings.llm_api_key:  # internal network is no-auth; honoured only if set
+            headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+        try:
+            resp = httpx.post(
+                settings.llm_endpoint,
+                json=payload,
+                headers=headers,
+                timeout=settings.llm_timeout_seconds,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise LLMUnavailable(f"呼叫 ProfetAI API 失敗:{exc}") from exc
+        return _extract_content(data)
+
+    def review_document(self, *, filename: str, text: str) -> DocumentReview:
+        content = self._chat(
+            system=prompts.review_system_prompt(),
+            user=prompts.review_user_prompt(filename=filename, markdown=text),
+        )
+        return _parse_review(content, filename=filename)
+
+    def evaluate_appeal(self, **kwargs) -> AppealEvaluation:
+        return self._stub.evaluate_appeal(**kwargs)
+
+
+def _build_llm() -> StubLLM | ProfetAILLM:
+    return ProfetAILLM() if settings.llm_endpoint else StubLLM()
+
+
+llm = _build_llm()
 
 
 def using_stub_llm() -> bool:
