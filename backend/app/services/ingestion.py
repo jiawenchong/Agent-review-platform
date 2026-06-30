@@ -17,7 +17,7 @@ from .blueprint import extract_fields
 from .extraction import ExtractionError, extract_text
 from .flowchart import generate_flowchart
 from .guardrails import record_event
-from .llm import llm
+from .llm import LLMUnavailable, llm
 
 
 def ingest_file(db: Session, *, filename: str, data: bytes) -> Document:
@@ -42,15 +42,33 @@ def ingest_file(db: Session, *, filename: str, data: bytes) -> Document:
         db.refresh(doc)
         return doc
 
+    # extract_text now returns Markdown ("資料分類做成 md 再讀取"); everything
+    # downstream — LLM 審核, flowchart, field extraction — consumes this Markdown.
     doc.kind = kind
     doc.extracted_text = text
     doc.char_count = len(text)
 
-    review = llm.review_document(filename=filename, text=text)
-    doc.llm_verdict = review.verdict
-    doc.llm_summary = review.summary
-    doc.llm_key_points = review.key_points
-    doc.llm_reasons = review.reasons
+    # AI 評審中心 — call the LLM (ProfetAI when configured, else stub). If the
+    # real API is unavailable, the Capability guardrail says: surface "無法審核"
+    # rather than fabricate a verdict, and do not auto-create a project.
+    review = None
+    try:
+        review = llm.review_document(filename=filename, text=text)
+        doc.llm_verdict = review.verdict
+        doc.llm_summary = review.summary
+        doc.llm_key_points = review.key_points
+        doc.llm_reasons = review.reasons
+    except LLMUnavailable as exc:
+        doc.llm_verdict = "無法審核"
+        doc.llm_summary = f"LLM 審核服務暫時無法使用,未產生評審結論({exc})。"
+        doc.llm_reasons = ["LLM 失效:無法審核,請稍後重試或聯絡管理員。"]
+        record_event(
+            db,
+            project_id=f"DOC-{doc.document_id}",
+            guardrail_type=GuardrailType.CAPABILITY,
+            detail=f"LLM 審核服務無法使用({filename}):{exc};已標示無法審核,不捏造評審結論。",
+            resolution="稍後重試 LLM 審核",
+        )
 
     # 計畫流程圖生成 — auto-produce a Mermaid flowchart from the document.
     flow = generate_flowchart(text)
@@ -62,7 +80,7 @@ def ingest_file(db: Session, *, filename: str, data: bytes) -> Document:
     doc.extracted_fields = fields.as_dict()
 
     # 自動建立專案:僅在 AI 評審中心核准 (綠燈) 且有 Agent 名稱時。
-    if review.verdict == "綠燈" and fields.agent_name:
+    if review is not None and review.verdict == "綠燈" and fields.agent_name:
         project = _create_project_from_fields(db, fields)
         doc.created_project_id = project.project_id
 

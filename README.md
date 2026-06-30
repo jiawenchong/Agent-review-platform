@@ -61,6 +61,33 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8010
 
 ⚠️ 目前沒有真正的登入驗證,只靠前端「目前身分(暫代登入)」切換器模擬身分(見下節)。開放給其他人連線前請注意:任何能連到這個網址的人都能任意切換身分、看到他人專案資料,僅適合可信的內網環境,不要開放到公開網際網路。
 
+## AI 審核(AI 評審中心)— 接 ProfetAI LLM API
+
+上傳文件的紅綠燈審核可以由**真實 LLM**(ProfetAI API)判讀。流程:
+
+1. 上傳檔(DOCX/PPTX/TXT/MD)→ 後端先把內容**轉成乾淨的 Markdown**(保留標題、表格、投影片結構),
+   讓 LLM 看到結構良好的文件而不是一坨純文字。
+2. 把這份 Markdown 連同審核 prompt 送到 ProfetAI API,模型回傳 `verdict`(綠燈/紅燈/待補件)、
+   `summary`、`key_points`、`reasons`。
+
+**啟用方式**(設環境變數即可,內網免驗證):
+
+```bash
+# Windows(在啟動前 set,或寫進 backend\.env)
+set APP_LLM_ENDPOINT=http://<你的內網主機>/profetai-api
+set APP_LLM_MODEL=<選填:模型名稱>
+```
+
+- `APP_LLM_ENDPOINT` **沒設** → 自動退回內建 `StubLLM`(規則判讀,免 GPU,可離線 demo)。
+- API **連不上或回傳格式不符** → 文件標示為「**無法審核**」並記一筆 Capability 紅線,
+  **不會捏造**綠燈/紅燈結論,也不會自動建立專案(可稍後重試)。
+- 內網免驗證;若日後 API 需要金鑰,設 `APP_LLM_API_KEY` 會自動帶 `Authorization: Bearer`。
+
+**審核用的 prompt** 放在 [`backend/app/prompts/document_review.md`](./backend/app/prompts/document_review.md)
+(單一來源:後端 connector 會載入這份切成 system/user 兩段;你也可以直接把它貼進 ProfetAI 的 skill 設定)。
+預設請求格式為 OpenAI 相容(`messages` / `choices[0].message.content`),拿到 ProfetAI 實際 spec 後在
+`backend/app/services/llm.py` 的 `_chat` / `_extract_content` 對欄位即可。
+
 ## 技術棧
 
 - 前端:React + TypeScript + Vite + react-router-dom
