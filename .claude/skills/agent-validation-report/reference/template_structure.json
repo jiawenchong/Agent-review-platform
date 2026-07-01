@@ -1,0 +1,118 @@
+{
+  "template_metadata": {
+    "name": "AI Agent Validation Report",
+    "version": "1.0",
+    "aspect_ratio": "16:9",
+    "background_color": "#0B1026",
+    "accent_colors": {
+      "primary": "#00FF9D",
+      "secondary": "#00BFFF",
+      "warning": "#FFD700",
+      "text_main": "#FFFFFF",
+      "text_sub": "#E0E0E0"
+    },
+    "fonts": {
+      "title": "Arial Black",
+      "body": "Arial",
+      "title_size": 36,
+      "body_size": 14
+    }
+  },
+  "pages": [
+    {
+      "id": "cover",
+      "type": "cover",
+      "elements": [
+        { "type": "logo", "position": "top_left", "placeholder": "Company Logo" },
+        { "type": "title", "text": "[報告主題]", "style": "main_title" },
+        { "type": "subtitle", "text": "[專案名稱]", "style": "sub_title" },
+        { "type": "info_block", "position": "bottom_left", "fields": ["報告人", "單位", "日期"] },
+        { "type": "graphic", "position": "bottom_right", "description": "AI Chip Graphic" },
+        { "type": "footer", "text": "ASE Confidential / Security-C", "style": "footer_text" }
+      ]
+    },
+    {
+      "id": "goal_definition",
+      "type": "content",
+      "layout": "two_column_bottom_flow",
+      "elements": [
+        { "type": "table", "position": "left", "columns": ["專案說明", "Agent 角色", "核心使命", "觸發時機"] },
+        { "type": "box", "position": "right", "title": "Agent 指標", "fields": ["成功門檻", "專案指標"] },
+        { "type": "flowchart", "position": "bottom", "steps": ["Trigger", "Perception", "Reasoning", "Action", "Feedback"] }
+      ]
+    },
+    {
+      "id": "data_sources",
+      "type": "content",
+      "layout": "three_column_top_table",
+      "elements": [
+        { "type": "columns", "count": 3, "titles": ["資料來源 (Data)", "模型使用 (Model)", "知識庫內容 (Knowledge)"] },
+        { "type": "table", "position": "bottom", "columns": ["Skills", "Tools", "Data", "Source"] }
+      ]
+    },
+    {
+      "id": "decision_logic",
+      "type": "content",
+      "layout": "two_column_flow",
+      "elements": [
+        { "type": "table", "position": "left", "columns": ["Tasks", "Sub-Agent", "思考邏輯", "Tools & Skills"] },
+        { "type": "flowchart", "position": "right", "description": "Decision Flow Logic" },
+        { "type": "note", "position": "left_bottom", "text": "正式派發三十分鐘內，重填或補填" }
+      ]
+    },
+    {
+      "id": "guardrails",
+      "type": "content",
+      "layout": "single_table",
+      "elements": [
+        { "type": "table", "columns": ["No", "Guardrails Lists", "Description"], "rows_count": 5, "row_keys": ["Output", "Capability", "Grounding", "Hallucination", "Goal"] }
+      ]
+    },
+    {
+      "id": "golden_tests",
+      "type": "content",
+      "layout": "single_table",
+      "elements": [
+        { "type": "table", "columns": ["Scenario", "問題狀況", "專家標準決策", "Agent 內容驗證檢查點"], "rows_count": 4 }
+      ]
+    },
+    {
+      "id": "task_capability",
+      "type": "content",
+      "layout": "two_column_images",
+      "elements": [
+        { "type": "text", "position": "top", "text": "成功標準說明" },
+        { "type": "tables", "position": "left", "count": 2, "titles": ["任務成功率", "結果準確率"] },
+        { "type": "images", "position": "right", "count": 3, "descriptions": ["工程條列", "進度解析", "Agenda 優先順序"] }
+      ]
+    },
+    {
+      "id": "offline_validation",
+      "type": "content",
+      "layout": "two_column_charts",
+      "elements": [
+        { "type": "text", "position": "top", "text": "Offline 驗證說明" },
+        { "type": "image", "position": "left", "description": "郵件清單截圖" },
+        { "type": "chart", "position": "right", "chart_type": "bar_chart", "metrics": ["產出正確率", "成功率"] }
+      ]
+    },
+    {
+      "id": "online_validation",
+      "type": "content",
+      "layout": "two_column_charts",
+      "elements": [
+        { "type": "text", "position": "top", "text": "Online 驗證說明" },
+        { "type": "image", "position": "left", "description": "郵件清單截圖" },
+        { "type": "charts", "position": "right", "count": 2, "types": ["成功率長條圖", "時間對比長條圖"] }
+      ]
+    },
+    {
+      "id": "closing",
+      "type": "closing",
+      "elements": [
+        { "type": "text", "position": "center", "text": "Q&A" },
+        { "type": "text", "position": "bottom", "text": "謝謝聆聽" }
+      ]
+    }
+  ]
+}

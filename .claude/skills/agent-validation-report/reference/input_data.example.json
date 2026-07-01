@@ -1,0 +1,56 @@
+{
+  "title": "預算AI審核 Agent 驗證報告",
+  "subtitle": "廠務系統預算初審自動化",
+  "info": {
+    "reporter": "張佳雯",
+    "department": "廠務部門",
+    "date": "2026-08-15"
+  },
+
+  "project_desc": "對廠務系統所有預算案件進行 AI 初步預審,提供專家審核參考",
+  "agent_role": "預算初審助理,產出批准/退件建議與歷史案例引用",
+  "mission": "縮短審核 cycle time,取代 Excel 人工作業",
+  "trigger": "PBMS 系統 FAC 關卡收到新預算申請",
+  "success_threshold": "AI 預審結論與專家最終審核一致率 ≥ 85%",
+  "project_metrics": "cycle time 降低 > 50%(現況 4 小時/件)",
+
+  "data_sources": "PBMS 歷史預算案件、廠務工程系統歸屬對照表",
+  "model_usage": "ProphetAI Agent(審核 / 流程圖 / 申訴各自獨立 agent)",
+  "knowledge_base": "歷史批准/退件案例 RAG,每輪複審後自動更新",
+  "skills": "文件解析、RAG 檢索、結構化審核建議生成",
+  "tools": "ProphetAI API、PBMS 系統介接",
+  "data": "預算申請文件(PDF/PPT/Word/Excel)",
+  "source": "PBMS 系統 Email 通知",
+
+  "tasks": "初審 / 派發 / 複審回饋",
+  "sub_agent": "審核 Agent",
+  "logic": "信心分數 ≥0.7 才進入自動分類,否則轉人工",
+  "logic_tools": "ProphetAI review agent + RAG",
+
+  "g1_output": "回覆格式固定為 JSON,欄位缺漏視為無法審核",
+  "g2_capability": "API 逾時或連不上 → 標示無法審核,不捏造結論",
+  "g3_grounding": "審核建議必須引用實際文件內容,不得無中生有",
+  "g4_hallucination": "AI 結論與 PBMS 數據矛盾時,強制標記人工複審",
+  "g5_goal": "AI 僅供參考,最終核准權仍在廠務專家",
+
+  "t1_problem": "案件缺少必要附件",
+  "t1_expert": "退件並註明缺件項目",
+  "t1_check": "Agent 需列出缺失的必要章節",
+  "t2_problem": "申請理由模糊(如「例行採購」)",
+  "t2_expert": "退回要求補充具體用途",
+  "t2_check": "Agent 判定為待補件而非直接核准",
+  "t3_problem": "申請金額與歷史同類案件差異 > 3 倍",
+  "t3_expert": "轉人工複審,不自動核准",
+  "t3_check": "Agent 觸發 Hallucination 紅線並停止自動核准",
+  "t4_problem": "上傳檔案損壞無法解析",
+  "t4_expert": "要求重新上傳",
+  "t4_check": "Agent 標記解析失敗,不產生審核結論",
+
+  "task_rate": "100%(N=356 件)",
+  "accuracy_rate": "91%",
+
+  "days": 20,
+  "period": "2026/07/01 - 2026/07/20",
+
+  "run_days": 30
+}
