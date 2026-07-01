@@ -2,9 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { StatusPill } from '../components/StatusPill';
-import { scoreColor } from '../data/styleMaps';
+import { scoreColor, VERDICT_STYLE } from '../data/styleMaps';
 import type { ProjectStatus } from '../data/types';
-import { listProjects, listUsers, projectStatus, type ApiProject, type ApiUser } from '../api/client';
+import {
+  listDocuments,
+  listGuardrailEvents,
+  listProjects,
+  listUsers,
+  projectStatus,
+  type ApiDocumentSummary,
+  type ApiGuardrailEvent,
+  type ApiProject,
+  type ApiUser,
+} from '../api/client';
 
 const STATUS_FILTERS: { key: ProjectStatus | 'all'; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -12,6 +22,8 @@ const STATUS_FILTERS: { key: ProjectStatus | 'all'; label: string }[] = [
   { key: 'watch', label: '觀察中' },
   { key: 'red', label: '紅線觸發' },
 ];
+
+const VERDICT_ORDER = ['綠燈', '紅燈', '待補件', '無法審核'];
 
 function formatDate(iso: string): string {
   return iso.slice(0, 10);
@@ -25,16 +37,20 @@ export function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [users, setUsers] = useState<ApiUser[]>([]);
+  const [documents, setDocuments] = useState<ApiDocumentSummary[]>([]);
+  const [guardrailEvents, setGuardrailEvents] = useState<ApiGuardrailEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listProjects(), listUsers()])
-      .then(([projs, us]) => {
+    Promise.all([listProjects(), listUsers(), listDocuments(), listGuardrailEvents()])
+      .then(([projs, us, docs, events]) => {
         if (cancelled) return;
         setProjects(projs);
         setUsers(us);
+        setDocuments(docs);
+        setGuardrailEvents(events);
         setError('');
       })
       .catch((e) => {
@@ -60,6 +76,28 @@ export function Dashboard() {
     const red = projects.filter((p) => projectStatus(p.status) === 'red').length;
     return { total, normal, watch, red };
   }, [projects]);
+
+  const evalStats = useMemo(() => {
+    const total = documents.length;
+    const byVerdict: Record<string, number> = {};
+    for (const d of documents) {
+      if (!d.llm_verdict) continue;
+      byVerdict[d.llm_verdict] = (byVerdict[d.llm_verdict] ?? 0) + 1;
+    }
+    const createdProjects = documents.filter((d) => d.created_project_id).length;
+    return { total, byVerdict, createdProjects };
+  }, [documents]);
+
+  const guardrailStats = useMemo(() => {
+    const total = guardrailEvents.length;
+    const unresolved = guardrailEvents.filter((e) => !e.resolution).length;
+    const byType: Record<string, number> = {};
+    for (const e of guardrailEvents) {
+      byType[e.guardrail_type] = (byType[e.guardrail_type] ?? 0) + 1;
+    }
+    const topTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    return { total, unresolved, topTypes };
+  }, [guardrailEvents]);
 
   const filtered = useMemo(() => {
     return projects.filter((p) => {
@@ -97,6 +135,75 @@ export function Dashboard() {
           <div className="kpi-card">
             <div className="kpi-label">紅線觸發</div>
             <div className="kpi-value" style={{ color: 'var(--red-text)' }}>{kpis.red}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginTop: 16, marginBottom: 8 }}>
+          <div className="card" style={{ padding: '16px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)' }}>
+                規劃書評估總覽
+              </div>
+              <button className="btn btn-outline" style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={() => navigate('/upload')}>
+                前往規劃書評估
+              </button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+              <span style={{ fontFamily: 'var(--font-serif)', fontSize: 28, color: 'var(--text-heading)' }}>{evalStats.total}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>份規劃書已評估</span>
+            </div>
+            {evalStats.total === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>尚無任何評估紀錄。</div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                {VERDICT_ORDER.filter((v) => evalStats.byVerdict[v]).map((verdict) => (
+                  <span
+                    key={verdict}
+                    className="chip"
+                    style={{ cursor: 'default', border: 'none', background: VERDICT_STYLE[verdict].bg, color: VERDICT_STYLE[verdict].color }}
+                  >
+                    {verdict} {evalStats.byVerdict[verdict]}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>
+              已自動建立專案:<strong style={{ color: 'var(--text-heading)' }}>{evalStats.createdProjects}</strong> 份(綠燈且含 Agent 名稱)
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: '16px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)' }}>
+                紅線稽核摘要
+              </div>
+              <button className="btn btn-outline" style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={() => navigate('/audit')}>
+                前往稽核紀錄
+              </button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 12 }}>
+              <div>
+                <span style={{ fontFamily: 'var(--font-serif)', fontSize: 28, color: 'var(--text-heading)' }}>{guardrailStats.total}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-dim)', marginLeft: 6 }}>總觸發次數</span>
+              </div>
+              <div>
+                <span style={{ fontFamily: 'var(--font-serif)', fontSize: 20, color: guardrailStats.unresolved > 0 ? 'var(--red-text)' : 'var(--green-text)' }}>
+                  {guardrailStats.unresolved}
+                </span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-dim)', marginLeft: 6 }}>未解決</span>
+              </div>
+            </div>
+            {guardrailStats.total === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>尚無紅線事件觸發紀錄。</div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {guardrailStats.topTypes.map(([type, count]) => (
+                  <span key={type} className="chip" style={{ cursor: 'default' }}>
+                    {type} {count}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

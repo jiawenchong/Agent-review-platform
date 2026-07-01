@@ -72,6 +72,24 @@ export async function uploadDocuments(files: File[]): Promise<UploadedDocument[]
   return apiFetch<UploadedDocument[]>('/api/uploads', { method: 'POST', body: form });
 }
 
+export interface ApiDocumentSummary {
+  document_id: number;
+  filename: string;
+  kind: string | null;
+  size_bytes: number;
+  uploaded_at: string;
+  status: DocumentStatus;
+  char_count: number;
+  error: string | null;
+  llm_verdict: string | null;
+  llm_summary: string | null;
+  created_project_id: string | null;
+}
+
+export function listDocuments(): Promise<ApiDocumentSummary[]> {
+  return apiFetch<ApiDocumentSummary[]>('/api/uploads');
+}
+
 // ── users ──────────────────────────────────────────────────────────────
 
 export interface ApiUser {

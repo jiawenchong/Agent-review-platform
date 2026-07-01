@@ -20,3 +20,11 @@ export function scoreColor(score: number): string {
   if (score >= 55) return 'var(--amber-text)';
   return 'var(--red-text)';
 }
+
+// AI 評審中心 verdict on an uploaded planning document (規劃書評估).
+export const VERDICT_STYLE: Record<string, { color: string; bg: string }> = {
+  綠燈: { color: 'var(--green-text)', bg: 'var(--green-bg)' },
+  紅燈: { color: 'var(--red-text)', bg: 'var(--red-bg)' },
+  待補件: { color: 'var(--amber-text)', bg: 'var(--amber-bg)' },
+  無法審核: { color: 'var(--gray-text)', bg: 'var(--gray-bg)' },
+};

@@ -163,6 +163,7 @@ class DocumentSummary(ORMModel):
     error: str | None
     llm_verdict: str | None
     llm_summary: str | None
+    created_project_id: str | None
 
 
 # ── scan ───────────────────────────────────────────────────────────────

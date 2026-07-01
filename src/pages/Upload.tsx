@@ -5,6 +5,7 @@ import { Mermaid } from '../components/Mermaid';
 import { uploadDocuments } from '../api/client';
 import { useUploadResults } from '../context/UploadResultsContext';
 import { exportFlowchartToPptx } from '../utils/flowchartExport';
+import { VERDICT_STYLE } from '../data/styleMaps';
 
 const FIELD_LABELS: Record<string, string> = {
   agent_name: 'Agent 名稱',
@@ -20,13 +21,6 @@ const FIELD_LABELS: Record<string, string> = {
 
 const ACCEPT = '.pptx,.docx,.txt,.md';
 const ACCEPT_LABEL = 'PPTX · DOCX · TXT';
-
-const VERDICT_STYLE: Record<string, { color: string; bg: string }> = {
-  綠燈: { color: 'var(--green-text)', bg: 'var(--green-bg)' },
-  紅燈: { color: 'var(--red-text)', bg: 'var(--red-bg)' },
-  待補件: { color: 'var(--amber-text)', bg: 'var(--amber-bg)' },
-  無法審核: { color: 'var(--gray-text)', bg: 'var(--gray-bg)' },
-};
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

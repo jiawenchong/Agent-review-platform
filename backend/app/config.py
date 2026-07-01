@@ -16,7 +16,10 @@ class Settings(BaseSettings):
 
     # --- core ---
     database_url: str = "sqlite:///./governance.db"
-    seed_on_startup: bool = True
+    # Demo-only fixture data (see app/seed.py) — 6 sample Agent projects, so
+    # the dashboard isn't empty on a fresh clone. OFF by default for real
+    # deployments; flip to true locally if you want the demo dataset back.
+    seed_on_startup: bool = False
 
     # --- closed-loop monitor (§三, §九) ---
     scan_interval_days: int = 7          # Cron 每 7 天觸發

@@ -127,6 +127,21 @@ blueprint.py → 欄位抽取（Agent名稱/提案人/部門/目標等）
 [僅綠燈 + 有 Agent 名稱] → 建立 Project → 進入 Closed-Loop 監控
 ```
 
+## 專案儀表板的統計方塊
+
+`Dashboard.tsx` 除了專案列表,還有兩個彙總卡片,資料都來自真實 API(不是假資料):
+
+| 卡片 | 資料來源 | 內容 |
+| --- | --- | --- |
+| 規劃書評估總覽 | `GET /api/uploads`(`listDocuments`) | 已評估總數、綠/紅/待補件/無法審核分佈、已自動建立專案數 |
+| 紅線稽核摘要 | `GET /api/guardrail-events`(`listGuardrailEvents`) | 總觸發次數、未解決數、Top 3 紅線類型 |
+
+還可以加(尚未實作,可視需要擴充):
+- 平均治理分數 / 分數趨勢(需新增歷史分數快照的彙總 API)
+- 近期活動時間軸(新建立專案、燈號變化、升級事件混合排序)
+- Closed-Loop 巡查狀態(下次巡查時間、目前 STALLED/ESCALATED 專案數)
+- 待處理申訴數(`Appeal` 中尚無 `llm_verdict` 的筆數)
+
 ## Closed-Loop 進度監控
 
 APScheduler 每 7 天（`APP_SCAN_INTERVAL_DAYS`）自動巡查所有 NORMAL 專案：
@@ -175,8 +190,19 @@ APScheduler 每 7 天（`APP_SCAN_INTERVAL_DAYS`）自動巡查所有 NORMAL 專
 | `APP_DATABASE_URL` | sqlite:///./governance.db | 資料庫 |
 | `APP_SCAN_INTERVAL_DAYS` | 7 | Closed-Loop 巡查頻率 |
 | `APP_STALL_THRESHOLD_DAYS` | 14 | 停滯判定天數 |
-| `APP_SEED_ON_STARTUP` | true | 啟動時填入示範資料 |
+| `APP_SEED_ON_STARTUP` | **false** | 啟動時填入 6 個示範 Agent 專案（demo 用，真實部署預設關閉） |
 | `VITE_API_BASE` | （空，走同源） | 前端 API base URL（開發時用） |
+
+如果現有 `governance.db` 是舊版（`APP_SEED_ON_STARTUP` 預設還是 true 時）建立的，裡面會有 6 個
+示範專案（信用風險評估 Agent 等）。清除方式：
+
+```bash
+cd backend && python scripts/remove_demo_seed.py
+```
+
+只會刪除 `app/seed.py` 裡定義的示範資料（比對 id + 內容才刪，不會動到你自己建立的真實專案），
+保留 `U-mgr` 主管身分供畫面切換使用。清完後不用再手動關閉 `APP_SEED_ON_STARTUP`——這個版本起
+預設已經是 `false`。
 
 ## 開發注意事項
 
