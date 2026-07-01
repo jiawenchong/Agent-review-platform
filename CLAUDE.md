@@ -129,18 +129,25 @@ blueprint.py → 欄位抽取（Agent名稱/提案人/部門/目標等）
 
 ## 專案儀表板的統計方塊
 
-`Dashboard.tsx` 除了專案列表,還有兩個彙總卡片,資料都來自真實 API(不是假資料):
+`Dashboard.tsx` 除了專案列表,還有六個彙總卡片,資料都來自真實 API(不是假資料):
 
 | 卡片 | 資料來源 | 內容 |
 | --- | --- | --- |
 | 規劃書評估總覽 | `GET /api/uploads`(`listDocuments`) | 已評估總數、綠/紅/待補件/無法審核分佈、已自動建立專案數 |
 | 紅線稽核摘要 | `GET /api/guardrail-events`(`listGuardrailEvents`) | 總觸發次數、未解決數、Top 3 紅線類型 |
+| 平均治理分數 | `GET /api/projects`(既有欄位 `score`) | 所有專案平均分數、依 ≥80/55–79/<55 分佈 |
+| 待處理申訴 | `GET /api/appeals`(`listAllAppeals`,新增) | 尚無 `llm_verdict` 的申訴數、總申訴數、待處理清單 |
+| Closed-Loop 巡查狀態 | `GET /api/health`(`getHealth`,新增 `next_scan_at`) | 下次自動巡查時間、巡查頻率、停滯門檻、已強制升級(`ai_auto_approval=false`)專案數 |
+| 近期活動時間軸 | 前三者資料在前端合併排序 | 新建立專案 + 規劃書評估 + 紅線事件,取最近 8 筆 |
 
-還可以加(尚未實作,可視需要擴充):
-- 平均治理分數 / 分數趨勢(需新增歷史分數快照的彙總 API)
-- 近期活動時間軸(新建立專案、燈號變化、升級事件混合排序)
-- Closed-Loop 巡查狀態(下次巡查時間、目前 STALLED/ESCALATED 專案數)
-- 待處理申訴數(`Appeal` 中尚無 `llm_verdict` 的筆數)
+`GET /api/appeals` 是新的跨專案彙總端點(`backend/app/routers/appeals.py`),沿用跟 `/api/projects/{id}/appeals`
+相同的 Information Isolation ACL(主管看全部,一般使用者只看自己專案的申訴)。
+
+`next_scan_at` 來自 `scheduler.py` 新增的 `next_scan_at()`,讀 APScheduler job 的 `next_run_time`;
+排程沒啟動(`APP_ENABLE_SCHEDULER=false`)時回傳 `null`,前端顯示「排程未啟動」。
+
+「平均治理分數」目前只顯示當前平均值,不是歷史趨勢線 — 真正的分數走勢需要另外儲存每輪 scan 的分數快照
+(現有 `ProgressSnapshot` 只存 `progress_value`,不存 `score`),之後如果要做趨勢圖可以再擴充。
 
 ## Closed-Loop 進度監控
 

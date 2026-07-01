@@ -177,6 +177,11 @@ export function submitAppeal(projectId: string, content: string, ownerId: string
   });
 }
 
+// Flattened across all (ACL-visible) projects — for the dashboard's 待處理申訴 card.
+export function listAllAppeals(): Promise<ApiAppeal[]> {
+  return apiFetch<ApiAppeal[]>('/api/appeals');
+}
+
 // ── notifications ──────────────────────────────────────────────────────
 
 export type ApiNotificationType = '停滯預警' | '升級通知';
@@ -235,6 +240,23 @@ export function listReports(): Promise<ApiReport[]> {
 export function createReport(period?: string): Promise<ApiReport> {
   const qs = period ? `?period=${encodeURIComponent(period)}` : '';
   return apiFetch<ApiReport>(`/api/reports${qs}`, { method: 'POST' });
+}
+
+// ── health ─────────────────────────────────────────────────────────────
+
+export interface ApiHealth {
+  status: string;
+  stub_kanban: boolean;
+  stub_llm: boolean;
+  llm_tasks: Record<string, boolean>;
+  rag_backend: string;
+  scan_interval_days: number;
+  stall_threshold_days: number;
+  next_scan_at: string | null;
+}
+
+export function getHealth(): Promise<ApiHealth> {
+  return apiFetch<ApiHealth>('/api/health');
 }
 
 export { API_BASE };

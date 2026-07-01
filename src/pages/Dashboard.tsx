@@ -5,13 +5,17 @@ import { StatusPill } from '../components/StatusPill';
 import { scoreColor, VERDICT_STYLE } from '../data/styleMaps';
 import type { ProjectStatus } from '../data/types';
 import {
+  getHealth,
+  listAllAppeals,
   listDocuments,
   listGuardrailEvents,
   listProjects,
   listUsers,
   projectStatus,
+  type ApiAppeal,
   type ApiDocumentSummary,
   type ApiGuardrailEvent,
+  type ApiHealth,
   type ApiProject,
   type ApiUser,
 } from '../api/client';
@@ -29,6 +33,21 @@ function formatDate(iso: string): string {
   return iso.slice(0, 10);
 }
 
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+interface TimelineItem {
+  time: string;
+  icon: string;
+  label: string;
+  detail: string;
+  onClick?: () => void;
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -39,18 +58,29 @@ export function Dashboard() {
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [documents, setDocuments] = useState<ApiDocumentSummary[]>([]);
   const [guardrailEvents, setGuardrailEvents] = useState<ApiGuardrailEvent[]>([]);
+  const [appeals, setAppeals] = useState<ApiAppeal[]>([]);
+  const [health, setHealth] = useState<ApiHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listProjects(), listUsers(), listDocuments(), listGuardrailEvents()])
-      .then(([projs, us, docs, events]) => {
+    Promise.all([
+      listProjects(),
+      listUsers(),
+      listDocuments(),
+      listGuardrailEvents(),
+      listAllAppeals(),
+      getHealth(),
+    ])
+      .then(([projs, us, docs, events, appealList, healthInfo]) => {
         if (cancelled) return;
         setProjects(projs);
         setUsers(us);
         setDocuments(docs);
         setGuardrailEvents(events);
+        setAppeals(appealList);
+        setHealth(healthInfo);
         setError('');
       })
       .catch((e) => {
@@ -68,6 +98,11 @@ export function Dashboard() {
     const map = new Map(users.map((u) => [u.user_id, u.name]));
     return (id: string) => map.get(id) ?? id;
   }, [users]);
+
+  const projectName = useMemo(() => {
+    const map = new Map(projects.map((p) => [p.project_id, p.name]));
+    return (id: string) => map.get(id) ?? id;
+  }, [projects]);
 
   const kpis = useMemo(() => {
     const total = projects.length;
@@ -98,6 +133,58 @@ export function Dashboard() {
     const topTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 3);
     return { total, unresolved, topTypes };
   }, [guardrailEvents]);
+
+  const scoreStats = useMemo(() => {
+    if (projects.length === 0) return { avg: 0, high: 0, mid: 0, low: 0 };
+    const avg = Math.round(projects.reduce((sum, p) => sum + p.score, 0) / projects.length);
+    const high = projects.filter((p) => p.score >= 80).length;
+    const mid = projects.filter((p) => p.score >= 55 && p.score < 80).length;
+    const low = projects.filter((p) => p.score < 55).length;
+    return { avg, high, mid, low };
+  }, [projects]);
+
+  const appealStats = useMemo(() => {
+    const total = appeals.length;
+    const pending = appeals.filter((a) => !a.llm_verdict);
+    return { total, pending };
+  }, [appeals]);
+
+  const escalatedCount = useMemo(
+    () => projects.filter((p) => !p.ai_auto_approval).length,
+    [projects],
+  );
+
+  const timeline = useMemo(() => {
+    const items: TimelineItem[] = [];
+    for (const p of projects) {
+      items.push({
+        time: p.created_at,
+        icon: '📁',
+        label: `建立專案「${p.name}」`,
+        detail: p.department,
+        onClick: () => navigate(`/projects/${p.project_id}`),
+      });
+    }
+    for (const d of documents) {
+      if (!d.llm_verdict) continue;
+      items.push({
+        time: d.uploaded_at,
+        icon: '📄',
+        label: `規劃書評估:${d.filename}`,
+        detail: d.llm_verdict,
+      });
+    }
+    for (const e of guardrailEvents) {
+      items.push({
+        time: e.triggered_at,
+        icon: '🚩',
+        label: `${e.guardrail_type} 紅線觸發`,
+        detail: e.detail.length > 60 ? `${e.detail.slice(0, 60)}…` : e.detail,
+        onClick: () => navigate('/audit'),
+      });
+    }
+    return items.sort((a, b) => (a.time < b.time ? 1 : -1)).slice(0, 8);
+  }, [projects, documents, guardrailEvents, navigate]);
 
   const filtered = useMemo(() => {
     return projects.filter((p) => {
@@ -138,7 +225,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, marginTop: 16, marginBottom: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginTop: 16, marginBottom: 16 }}>
           <div className="card" style={{ padding: '16px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)' }}>
@@ -201,6 +288,116 @@ export function Dashboard() {
                   <span key={type} className="chip" style={{ cursor: 'default' }}>
                     {type} {count}
                   </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: '16px 20px' }}>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)', marginBottom: 12 }}>
+              平均治理分數
+            </div>
+            {projects.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>尚無專案可計算分數。</div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: 28, color: scoreColor(scoreStats.avg) }}>{scoreStats.avg}</span>
+                  <span style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>/ 100(所有專案平均)</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <span className="chip" style={{ cursor: 'default', border: 'none', background: 'var(--green-bg)', color: 'var(--green-text)' }}>
+                    ≥80 分 {scoreStats.high}
+                  </span>
+                  <span className="chip" style={{ cursor: 'default', border: 'none', background: 'var(--amber-bg)', color: 'var(--amber-text)' }}>
+                    55–79 分 {scoreStats.mid}
+                  </span>
+                  <span className="chip" style={{ cursor: 'default', border: 'none', background: 'var(--red-bg)', color: 'var(--red-text)' }}>
+                    &lt;55 分 {scoreStats.low}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: '16px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)' }}>
+                待處理申訴
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 12 }}>
+              <div>
+                <span style={{ fontFamily: 'var(--font-serif)', fontSize: 28, color: appealStats.pending.length > 0 ? 'var(--amber-text)' : 'var(--green-text)' }}>
+                  {appealStats.pending.length}
+                </span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-dim)', marginLeft: 6 }}>筆待 LLM 判讀</span>
+              </div>
+              <div>
+                <span style={{ fontFamily: 'var(--font-serif)', fontSize: 20, color: 'var(--text-heading)' }}>{appealStats.total}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-dim)', marginLeft: 6 }}>總申訴數</span>
+              </div>
+            </div>
+            {appealStats.pending.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>沒有待處理的申訴。</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {appealStats.pending.slice(0, 3).map((a) => (
+                  <div
+                    key={a.appeal_id}
+                    style={{ fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}
+                    onClick={() => navigate(`/projects/${a.project_id}`)}
+                  >
+                    <span className="mono-id" style={{ marginRight: 6 }}>{a.project_id}</span>
+                    {projectName(a.project_id)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ padding: '16px 20px' }}>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)', marginBottom: 12 }}>
+              Closed-Loop 巡查狀態
+            </div>
+            <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', margin: 0, fontSize: 12.5 }}>
+              <dt style={{ color: 'var(--text-dim)' }}>下次自動巡查</dt>
+              <dd style={{ margin: 0, color: 'var(--text-heading)', fontWeight: 600 }}>
+                {health?.next_scan_at ? formatDateTime(health.next_scan_at) : '排程未啟動'}
+              </dd>
+              <dt style={{ color: 'var(--text-dim)' }}>巡查頻率</dt>
+              <dd style={{ margin: 0 }}>每 {health?.scan_interval_days ?? '—'} 天</dd>
+              <dt style={{ color: 'var(--text-dim)' }}>停滯判定門檻</dt>
+              <dd style={{ margin: 0 }}>{health?.stall_threshold_days ?? '—'} 天無進度</dd>
+              <dt style={{ color: 'var(--text-dim)' }}>已強制升級</dt>
+              <dd style={{ margin: 0, color: escalatedCount > 0 ? 'var(--red-text)' : 'var(--text)', fontWeight: escalatedCount > 0 ? 600 : 400 }}>
+                {escalatedCount} 個專案(已停用 AI 自動核准)
+              </dd>
+            </dl>
+          </div>
+
+          <div className="card" style={{ padding: '16px 20px', gridColumn: '1 / -1' }}>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)', marginBottom: 12 }}>
+              近期活動時間軸
+            </div>
+            {timeline.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>尚無活動紀錄。</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {timeline.map((item, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12.5,
+                      cursor: item.onClick ? 'pointer' : 'default',
+                    }}
+                    onClick={item.onClick}
+                  >
+                    <span style={{ fontSize: 14 }}>{item.icon}</span>
+                    <span className="mono-id" style={{ whiteSpace: 'nowrap' }}>{formatDateTime(item.time)}</span>
+                    <span style={{ color: 'var(--text-heading)', fontWeight: 600 }}>{item.label}</span>
+                    <span style={{ color: 'var(--text-dim)' }}>{item.detail}</span>
+                  </div>
                 ))}
               </div>
             )}

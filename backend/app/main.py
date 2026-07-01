@@ -23,8 +23,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import Base, SessionLocal, engine
-from .routers import guardrails, notifications, projects, reports, scan, uploads, users
-from .scheduler import shutdown_scheduler, start_scheduler
+from .routers import appeals, guardrails, notifications, projects, reports, scan, uploads, users
+from .scheduler import next_scan_at, shutdown_scheduler, start_scheduler
 from .seed import seed
 from .services.llm import configured_tasks, using_stub_llm
 
@@ -72,6 +72,7 @@ app.add_middleware(
 app.include_router(uploads.router)
 app.include_router(users.router)
 app.include_router(projects.router)
+app.include_router(appeals.router)
 app.include_router(notifications.router)
 app.include_router(guardrails.router)
 app.include_router(reports.router)
@@ -80,6 +81,7 @@ app.include_router(scan.router)
 
 @app.get("/api/health", tags=["health"])
 def health() -> dict:
+    next_scan = next_scan_at()
     return {
         "status": "ok",
         "stub_kanban": not settings.kanban_base_url,
@@ -88,6 +90,7 @@ def health() -> dict:
         "rag_backend": settings.rag_backend,
         "scan_interval_days": settings.scan_interval_days,
         "stall_threshold_days": settings.stall_threshold_days,
+        "next_scan_at": next_scan.isoformat() if next_scan else None,
     }
 
 
