@@ -74,6 +74,19 @@ _EXPECTED_SECTIONS = ("目標", "範圍", "時程", "風險", "資源", "里程�
 _VALID_VERDICTS = ("綠燈", "紅燈", "待補件")
 
 
+def _clean_mermaid(raw: str) -> str:
+    """Strip markdown fences the LLM might wrap around Mermaid code."""
+    text = raw.strip()
+    fence = re.search(r"```(?:mermaid)?\s*\n?([\s\S]+?)\n?```", text)
+    if fence:
+        text = fence.group(1).strip()
+    if not text.startswith("flowchart"):
+        flow = re.search(r"(flowchart\s+(?:TD|LR|BT|RL)[\s\S]+)", text)
+        if flow:
+            text = flow.group(1).strip()
+    return text
+
+
 class StubLLM:
     def review_document(self, *, filename: str, text: str) -> DocumentReview:
         """判讀 an extracted document — the AI 評審中心 step.
@@ -144,6 +157,10 @@ class StubLLM:
             grounding_violation=False,  # stub only cites supplied context
             contradiction_with_data=contradiction,
         )
+
+    def generate_flowchart(self, *, filename: str, text: str):
+        from .flowchart import generate_flowchart as _gen
+        return _gen(text)
 
 
 def _content_to_text(content: object) -> str | None:
@@ -312,6 +329,35 @@ class ProphetAILLM:
         )
         content = self._chat(prompt=prompt)
         return _parse_review(content, filename=filename)
+
+    def generate_flowchart(self, *, filename: str, text: str):
+        """Generate a Mermaid flowchart for the planning document.
+
+        Priority order:
+        1. User-authored structured flow block (S1 [process] … -> S2) in the doc.
+        2. ProphetAI LLM-inferred from document content.
+        3. Deterministic heading-based stub (fallback if LLM is down).
+        """
+        from .flowchart import FlowchartResult, parse_structured, render_mermaid
+
+        # 1 — Structured block takes precedence: precise, no LLM call needed.
+        structured = parse_structured(text)
+        if len(structured) >= 2:
+            return FlowchartResult(render_mermaid(structured), "structured", len(structured))
+
+        # 2 — Ask ProphetAI to read the document and draw the business flow.
+        prompt = (
+            prompts.flowchart_system_prompt()
+            + "\n\n----\n\n"
+            + prompts.flowchart_user_prompt(filename=filename, markdown=text)
+        )
+        try:
+            content = self._chat(prompt=prompt)
+            mermaid = _clean_mermaid(content)
+            return FlowchartResult(mermaid, "llm", mermaid.count("\n") + 1)
+        except LLMUnavailable:
+            # 3 — LLM down → fall back to the deterministic stub.
+            return self._stub.generate_flowchart(filename=filename, text=text)
 
     def evaluate_appeal(
         self,

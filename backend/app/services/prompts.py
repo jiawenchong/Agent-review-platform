@@ -7,6 +7,7 @@ split into ``=== SYSTEM ===`` / ``=== USER ===`` sections.
 
 * ``document_review.md``       — AI 評審中心:上傳規劃書的綠/紅/待補件審核
 * ``appeal_reasonableness.md`` — closed-loop:停滯專案申訴是否合理
+* ``flowchart_generation.md``  — LLM 自動生成業務流程圖 (Mermaid)
 """
 from __future__ import annotations
 
@@ -70,3 +71,14 @@ def appeal_user_prompt(
         appeal_text=appeal_text,
         rag_context=rag_context or "(無)",
     )
+
+
+# ── flowchart generation (LLM 自動推斷業務流程) ───────────────────────────
+
+
+def flowchart_system_prompt() -> str:
+    return _load("flowchart_generation.md")[0]
+
+
+def flowchart_user_prompt(*, filename: str, markdown: str) -> str:
+    return _load("flowchart_generation.md")[1].format(filename=filename, markdown=markdown)

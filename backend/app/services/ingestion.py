@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from ..models import Document, DocumentStatus, GuardrailType, Project, ProjectStatus
 from .blueprint import extract_fields
 from .extraction import ExtractionError, extract_text
-from .flowchart import generate_flowchart
 from .guardrails import record_event
 from .llm import LLMUnavailable, llm
 
@@ -70,8 +69,9 @@ def ingest_file(db: Session, *, filename: str, data: bytes) -> Document:
             resolution="稍後重試 LLM 審核",
         )
 
-    # 計畫流程圖生成 — auto-produce a Mermaid flowchart from the document.
-    flow = generate_flowchart(text)
+    # 計畫流程圖生成 — LLM reads the document and draws the business flow.
+    # ProphetAI is used when configured; falls back to deterministic stub.
+    flow = llm.generate_flowchart(filename=filename, text=text)
     doc.flowchart_mermaid = flow.mermaid
     doc.flowchart_mode = flow.mode
 

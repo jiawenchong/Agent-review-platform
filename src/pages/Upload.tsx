@@ -269,7 +269,7 @@ export function Upload() {
                             }}
                           >
                             <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, fontFamily: 'var(--font-mono)' }}>
-                              生成模式:{doc.flowchart_mode === 'structured' ? '結構化解析' : '依章節推斷'}
+                              生成模式:{doc.flowchart_mode === 'structured' ? '結構化解析' : doc.flowchart_mode === 'llm' ? 'AI 自動推斷' : '依章節推斷'}
                             </div>
                             <Mermaid chart={doc.flowchart_mermaid} />
                           </div>
