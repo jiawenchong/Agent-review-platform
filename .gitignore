@@ -22,6 +22,9 @@ backend/credentials.env
 backend/credentials.bat
 backend/credentials.sh
 
+# Claude Code agent worktrees (created by isolation: "worktree" runs, ephemeral)
+.claude/worktrees/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
