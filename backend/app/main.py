@@ -26,7 +26,7 @@ from .database import Base, SessionLocal, engine
 from .routers import guardrails, notifications, projects, reports, scan, uploads, users
 from .scheduler import shutdown_scheduler, start_scheduler
 from .seed import seed
-from .services.llm import using_stub_llm
+from .services.llm import configured_tasks, using_stub_llm
 
 
 @asynccontextmanager
@@ -84,6 +84,7 @@ def health() -> dict:
         "status": "ok",
         "stub_kanban": not settings.kanban_base_url,
         "stub_llm": using_stub_llm(),
+        "llm_tasks": configured_tasks(),  # {"review": bool, "flowchart": bool, "appeal": bool}
         "rag_backend": settings.rag_backend,
         "scan_interval_days": settings.scan_interval_days,
         "stall_threshold_days": settings.stall_threshold_days,

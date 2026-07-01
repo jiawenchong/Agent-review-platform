@@ -210,6 +210,10 @@ def test_ingest_llm_unavailable_marks_unreviewable(db, monkeypatch):
         def review_document(self, **kw):
             raise LLMUnavailable("api down")
 
+        def generate_flowchart(self, **kw):
+            from app.services.flowchart import generate_flowchart as _gen
+            return _gen(kw.get("text", ""))
+
     monkeypatch.setattr(ingestion, "llm", FailingLLM())
     doc = ingestion.ingest_file(
         db, filename="plan.txt", data="目標 範圍 時程 風險 資源 里程碑".encode("utf-8")

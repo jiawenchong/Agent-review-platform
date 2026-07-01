@@ -70,16 +70,27 @@ scripts/
 
 ## ProphetAI LLM 設定
 
-**金鑰絕對不能 commit**。只在 host 本機用環境變數帶入：
+三個任務（審核 / 流程圖生成 / 申訴合理性）各自是獨立的 ProphetAI Agent，**各自有自己的金鑰與 agent id，不共用**。
+
+**金鑰絕對不能 commit**。複製 `backend/credentials.bat.example` → `backend/credentials.bat`（已 gitignore）填入後執行：
 
 ```bash
-set COMPANY_LLM_API_KEY=ask_xxxx        # ProphetAI 金鑰
-set COMPANY_LLM_AGENT=<agent-uuid>      # 審核 agent 的 id（放 model 欄位）
+cd backend && credentials.bat   # Windows；Mac/Linux 用 credentials.sh.example
 ```
 
-- 兩個變數都有值 → 啟用 `ProphetAILLM`（呼叫真實 API）
-- 任何一個缺少 → 退回 `StubLLM`（規則判讀，可離線 demo）
+六個環境變數：
+
+| 任務 | API Key | Agent ID |
+| --- | --- | --- |
+| 文件審核 | `COMPANY_REVIEW_KEY` | `COMPANY_REVIEW_AGENT` |
+| 流程圖生成 | `COMPANY_FLOWCHART_KEY` | `COMPANY_FLOWCHART_AGENT` |
+| 申訴合理性 | `COMPANY_APPEAL_KEY` | `COMPANY_APPEAL_AGENT` |
+
+（舊版單一 `COMPANY_LLM_API_KEY` / `COMPANY_LLM_AGENT` 仍相容，任務沒填六個新變數時會退回用它）
+
+- 某任務金鑰/agent id 缺 → 該任務退回 `StubLLM`（規則判讀，可離線 demo）
 - API 連不上 / 逾時 → `LLMUnavailable` 例外 → 文件標「**無法審核**」+ Capability 紅線記錄
+- `/api/health` 的 `llm_tasks` 欄位可查每個任務是否已設定憑證
 
 ProphetAI 端點預設：`https://10.10.23.120:4231/public/kits/openai/v1/chat/completions`（可用 `APP_LLM_ENDPOINT` 覆寫）。
 

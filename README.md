@@ -74,28 +74,51 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8010
 OpenAI 相容端點、`model` 欄位放 **agent id**、`content` 用 **block 陣列**、**Bearer 驗證**、
 **關 SSL 驗證**(內網自簽憑證)、**不走對外 proxy**。實作在 `backend/app/services/llm.py` 的 `ProphetAILLM`。
 
-**啟用方式**:金鑰與 agent id **只在 host 本機**用環境變數帶入(**勿 commit**,填了等於把祕密推上 GitHub):
+**啟用方式**:三個任務 = 三個獨立的 ProphetAI Agent,各自有自己的金鑰與 agent id(不共用)。
+金鑰與 agent id **只在 host 本機**用環境變數帶入(**勿 commit**,填了等於把祕密推上 GitHub):
 
 ```bash
-# Windows(在啟動前 set,或寫進不進版控的本機檔)
-set COMPANY_LLM_API_KEY=ask_xxxx        REM ProphetAI 金鑰(不含 {{ }})
-set COMPANY_LLM_AGENT=<agent id>        REM 審核 agent 的 id(放在 model 欄位)
+# Windows:複製 backend/credentials.bat.example → backend/credentials.bat,
+# 填好三組憑證後,啟動後端前先執行它:
+cd backend
+credentials.bat
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-- 兩個環境變數**沒設** → 自動退回內建 `StubLLM`(規則判讀,免 GPU,可離線 demo)。
+```bash
+# Mac/Linux:複製 backend/credentials.sh.example → backend/credentials.sh
+cd backend
+source credentials.sh
+uvicorn app.main:app --host 0.0.0.0 --port 8010
+```
+
+`credentials.bat` / `credentials.sh` 本身已被 `.gitignore` 排除,只有內容留空的 `.example` 範本會進版控。
+六個環境變數(可只填其中幾組,其餘任務會退回 `StubLLM`):
+
+| 任務 | API Key 變數 | Agent ID 變數 |
+| --- | --- | --- |
+| 文件審核(AI 評審中心) | `COMPANY_REVIEW_KEY` | `COMPANY_REVIEW_AGENT` |
+| 流程圖生成(AS IS / TO BE) | `COMPANY_FLOWCHART_KEY` | `COMPANY_FLOWCHART_AGENT` |
+| 申訴合理性(closed-loop) | `COMPANY_APPEAL_KEY` | `COMPANY_APPEAL_AGENT` |
+
+> 舊版單一 Agent 設定(`COMPANY_LLM_API_KEY` / `COMPANY_LLM_AGENT`)仍相容 — 沒填上面六個變數時,三個任務都會退回用這組舊變數。
+
+- 某任務的金鑰/agent id **沒設** → 該任務自動退回 `StubLLM`(規則判讀,免 GPU,可離線 demo)。
 - API **連不上 / 403 / 回傳格式不符** → 文件標示為「**無法審核**」並記一筆 Capability 紅線,
   **不會捏造**綠燈/紅燈結論,也不會自動建立專案(可稍後重試;常見錯誤排查見 skill)。
 - 端點預設為 `https://10.10.23.120:4231/...`(可用 `APP_LLM_ENDPOINT` 覆寫);逾時預設 180 秒(`APP_LLM_TIMEOUT_SECONDS`)。
+- `/api/health` 的 `llm_tasks` 欄位會顯示三個任務各自是否已設定憑證,方便確認填對了沒有。
 
-**兩個 LLM 判讀步驟、兩份 prompt**(都在 [`backend/app/prompts/`](./backend/app/prompts/),單一來源:connector 載入切 system/user 後**內嵌**送出,也可直接貼進 ProphetAI 後台對應 agent):
+**三個 LLM 判讀步驟、三份 prompt**(都在 [`backend/app/prompts/`](./backend/app/prompts/),單一來源:connector 載入切 system/user 後**內嵌**送出,也可直接貼進 ProphetAI 後台對應 agent):
 
 | 用途 | prompt 檔 | 結論 | 時機 |
 | --- | --- | --- | --- |
 | 文件審核(AI 評審中心) | [`document_review.md`](./backend/app/prompts/document_review.md) | 綠燈 / 紅燈 / 待補件 | 上傳規劃書時 |
+| 流程圖生成 | [`flowchart_generation.md`](./backend/app/prompts/flowchart_generation.md) | AS IS + TO BE 兩張 Mermaid 流程圖 | 上傳規劃書時 |
 | 申訴合理性(closed-loop) | [`appeal_reasonableness.md`](./backend/app/prompts/appeal_reasonableness.md) | 合理 / 不合理 | 專案停滯、負責人申訴後 |
 
-兩者都吃同一組 ProphetAI 設定(`COMPANY_LLM_API_KEY` / `COMPANY_LLM_AGENT`)。差別在失效行為:
-文件審核失效 → 標「無法審核」;申訴判讀失效 → **退回規則 stub**(每週巡查是背景自動流程,不能因 LLM 掛掉而中斷)。
+三者失效行為不同:文件審核失效 → 標「無法審核」;流程圖生成失效 → 退回依章節推斷的簡易流程圖;
+申訴判讀失效 → **退回規則 stub**(每週巡查是背景自動流程,不能因 LLM 掛掉而中斷)。
 
 ## 技術棧
 

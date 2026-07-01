@@ -35,8 +35,27 @@ from .connectors import RagHit, rag
 
 # Host-only credentials (see .claude/skills/prophetai-api). Never committed:
 # the repo leaves these empty and the host machine fills them via env vars.
-_ENV_API_KEY = "COMPANY_LLM_API_KEY"   # ask_xxxx
-_ENV_AGENT_ID = "COMPANY_LLM_AGENT"    # ProphetAI agent id → goes in the `model` field
+# Fill in backend/credentials.bat (Windows) or backend/credentials.sh (Mac/Linux).
+# Each task is its own ProphetAI agent with its own key + agent id — they are
+# NOT shared, since the three agents were provisioned independently.
+_ENV_REVIEW_KEY        = "COMPANY_REVIEW_KEY"          # 文件審核 API key
+_ENV_REVIEW_AGENT      = "COMPANY_REVIEW_AGENT"        # 文件審核 agent id (綠/紅/待補件)
+_ENV_FLOWCHART_KEY     = "COMPANY_FLOWCHART_KEY"       # 流程圖生成 API key
+_ENV_FLOWCHART_AGENT   = "COMPANY_FLOWCHART_AGENT"     # 流程圖生成 agent id (AS IS + TO BE)
+_ENV_APPEAL_KEY        = "COMPANY_APPEAL_KEY"          # 申訴合理性 API key
+_ENV_APPEAL_AGENT      = "COMPANY_APPEAL_AGENT"        # 申訴合理性 agent id (closed-loop)
+
+# Backward-compat: a single-agent setup can still set these two instead of
+# the six task-specific vars above; every task falls back to them.
+_ENV_LEGACY_KEY        = "COMPANY_LLM_API_KEY"
+_ENV_LEGACY_AGENT      = "COMPANY_LLM_AGENT"
+
+# (task_key_env, task_agent_env) tuples, keyed by task name.
+_TASK_CREDENTIALS = {
+    "review": (_ENV_REVIEW_KEY, _ENV_REVIEW_AGENT),
+    "flowchart": (_ENV_FLOWCHART_KEY, _ENV_FLOWCHART_AGENT),
+    "appeal": (_ENV_APPEAL_KEY, _ENV_APPEAL_AGENT),
+}
 
 
 class LLMUnavailable(Exception):
@@ -300,14 +319,21 @@ class ProphetAILLM:
     """
 
     def __init__(self) -> None:
-        self._stub = StubLLM()  # appeals still use the deterministic stub (B5)
+        self._stub = StubLLM()
 
-    def _chat(self, *, prompt: str) -> str:
-        api_key = os.environ.get(_ENV_API_KEY, "")
-        agent_id = os.environ.get(_ENV_AGENT_ID, "")
+    def _resolve_credentials(self, task: str) -> tuple[str, str]:
+        """Return (api_key, agent_id) for the task, falling back to the legacy vars."""
+        key_env, agent_env = _TASK_CREDENTIALS[task]
+        api_key = os.environ.get(key_env) or os.environ.get(_ENV_LEGACY_KEY) or ""
+        agent_id = os.environ.get(agent_env) or os.environ.get(_ENV_LEGACY_AGENT) or ""
+        return api_key, agent_id
+
+    def _chat(self, *, prompt: str, task: str = "review") -> str:
+        api_key, agent_id = self._resolve_credentials(task)
+        key_env, agent_env = _TASK_CREDENTIALS[task]
         if not api_key or not agent_id:
             raise LLMUnavailable(
-                f"{_ENV_API_KEY} / {_ENV_AGENT_ID} 未設定(請在 host 本機環境變數填入,勿 commit)。"
+                f"{key_env} / {agent_env} 未設定(請在 host 本機環境變數填入,勿 commit)。"
             )
 
         payload = json.dumps(
@@ -347,7 +373,7 @@ class ProphetAILLM:
             + "\n\n----\n\n"
             + prompts.review_user_prompt(filename=filename, markdown=text)
         )
-        content = self._chat(prompt=prompt)
+        content = self._chat(prompt=prompt, task="review")
         return _parse_review(content, filename=filename)
 
     def generate_flowchart(self, *, filename: str, text: str):
@@ -372,7 +398,7 @@ class ProphetAILLM:
             + prompts.flowchart_user_prompt(filename=filename, markdown=text)
         )
         try:
-            content = self._chat(prompt=prompt)
+            content = self._chat(prompt=prompt, task="flowchart")
             # Try the two-chart JSON format first; fall back to single Mermaid.
             two_chart_json = _parse_flowchart_json(content)
             if two_chart_json:
@@ -419,7 +445,7 @@ class ProphetAILLM:
         )
 
         try:
-            reasonable, reason = _parse_appeal(self._chat(prompt=prompt))
+            reasonable, reason = _parse_appeal(self._chat(prompt=prompt, task="appeal"))
         except LLMUnavailable:
             # The weekly scan is an autonomous background job — it must not halt
             # if the LLM is down. Degrade to the deterministic rule (B5 stub) so
@@ -446,8 +472,16 @@ class ProphetAILLM:
         )
 
 
+def _task_credentials_present(task: str) -> bool:
+    key_env, agent_env = _TASK_CREDENTIALS[task]
+    api_key = os.environ.get(key_env) or os.environ.get(_ENV_LEGACY_KEY)
+    agent_id = os.environ.get(agent_env) or os.environ.get(_ENV_LEGACY_AGENT)
+    return bool(api_key and agent_id)
+
+
 def _credentials_present() -> bool:
-    return bool(os.environ.get(_ENV_API_KEY) and os.environ.get(_ENV_AGENT_ID))
+    """True if at least one of the three tasks (review/flowchart/appeal) is configured."""
+    return any(_task_credentials_present(task) for task in _TASK_CREDENTIALS)
 
 
 def _build_llm() -> StubLLM | ProphetAILLM:
@@ -459,3 +493,8 @@ llm = _build_llm()
 
 def using_stub_llm() -> bool:
     return not _credentials_present()
+
+
+def configured_tasks() -> dict[str, bool]:
+    """Per-task credential status, surfaced by /api/health for diagnostics."""
+    return {task: _task_credentials_present(task) for task in _TASK_CREDENTIALS}
