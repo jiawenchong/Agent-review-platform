@@ -283,23 +283,21 @@ def _parse_appeal(content: str) -> tuple[bool, str]:
     return reasonable, reason
 
 
-def _parse_flowchart_json(content: str) -> str | None:
-    """Try to extract {as_is, to_be} JSON from LLM flowchart response.
+def _parse_flowchart_pair(content: str) -> tuple[str | None, str | None]:
+    """Extract (as_is, to_be) Mermaid strings from the LLM flowchart response.
 
-    Returns a JSON string ready to store, or None if the response is not
-    in the expected two-chart format (caller falls back to single chart).
+    Either side is None if the response doesn't contain that key (caller
+    decides how to fill in the gap — e.g. a user-authored structured TO BE).
     """
     try:
         obj = _extract_json_object(content)
     except LLMUnavailable:
-        return None
+        return None, None
     as_is = obj.get("as_is") or obj.get("AS_IS") or obj.get("asIs")
     to_be = obj.get("to_be") or obj.get("TO_BE") or obj.get("toBe")
-    if not (as_is and to_be):
-        return None
-    return json.dumps(
-        {"as_is": _clean_mermaid(str(as_is)), "to_be": _clean_mermaid(str(to_be))},
-        ensure_ascii=False,
+    return (
+        _clean_mermaid(str(as_is)) if as_is else None,
+        _clean_mermaid(str(to_be)) if to_be else None,
     )
 
 
@@ -387,21 +385,21 @@ class ProphetAILLM:
         return _parse_review(content, filename=filename)
 
     def generate_flowchart(self, *, filename: str, text: str):
-        """Generate a Mermaid flowchart for the planning document.
+        """Generate AS IS + TO BE Mermaid flowcharts for the planning document.
 
-        Priority order:
-        1. User-authored structured flow block (S1 [process] … -> S2) in the doc.
+        Priority order for the TO BE chart:
+        1. User-authored structured flow block (S1 [process] … -> S2) in the doc
+           — rendered exactly as written (precise, no LLM call needed).
         2. ProphetAI LLM-inferred from document content.
-        3. Deterministic heading-based stub (fallback if LLM is down).
+        The AS IS chart always comes from the LLM (there is no structured
+        syntax for "current manual process"); if the LLM is unavailable, the
+        result degrades to whichever TO BE source succeeded, with no AS IS tab.
         """
         from .flowchart import FlowchartResult, parse_structured, render_mermaid
 
-        # 1 — Structured block takes precedence: precise, no LLM call needed.
         structured = parse_structured(text)
-        if len(structured) >= 2:
-            return FlowchartResult(render_mermaid(structured), "structured", len(structured))
+        structured_to_be = render_mermaid(structured, direction="LR") if len(structured) >= 2 else None
 
-        # 2 — Ask ProphetAI to produce AS IS + TO BE in JSON.
         prompt = (
             prompts.flowchart_system_prompt()
             + "\n\n----\n\n"
@@ -409,15 +407,25 @@ class ProphetAILLM:
         )
         try:
             content = self._chat(prompt=prompt, task="flowchart")
-            # Try the two-chart JSON format first; fall back to single Mermaid.
-            two_chart_json = _parse_flowchart_json(content)
-            if two_chart_json:
-                return FlowchartResult(two_chart_json, "llm", 0)
-            mermaid = _clean_mermaid(content)
-            return FlowchartResult(mermaid, "llm", mermaid.count("\n") + 1)
         except LLMUnavailable:
-            # 3 — LLM down → fall back to the deterministic stub.
+            if structured_to_be:
+                return FlowchartResult(structured_to_be, "structured", len(structured))
             return self._stub.generate_flowchart(filename=filename, text=text)
+
+        llm_as_is, llm_to_be = _parse_flowchart_pair(content)
+
+        if structured_to_be:
+            # User-defined flow wins for TO BE; LLM still supplies AS IS.
+            to_be = structured_to_be
+            mode = "structured" if llm_as_is is None else "structured+llm"
+        else:
+            to_be = llm_to_be or _clean_mermaid(content)
+            mode = "llm"
+
+        if llm_as_is:
+            two_chart_json = json.dumps({"as_is": llm_as_is, "to_be": to_be}, ensure_ascii=False)
+            return FlowchartResult(two_chart_json, mode, 0)
+        return FlowchartResult(to_be, mode, to_be.count("\n") + 1)
 
     def evaluate_appeal(
         self,

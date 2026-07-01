@@ -2,7 +2,9 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { Mermaid } from '../components/Mermaid';
-import { uploadDocuments, type UploadedDocument } from '../api/client';
+import { uploadDocuments } from '../api/client';
+import { useUploadResults } from '../context/UploadResultsContext';
+import { exportFlowchartToPptx } from '../utils/flowchartExport';
 
 const FIELD_LABELS: Record<string, string> = {
   agent_name: 'Agent 名稱',
@@ -45,12 +47,13 @@ function parseFlowchart(raw: string | null): { asIs: string | null; toBe: string
 
 export function Upload() {
   const navigate = useNavigate();
+  const { results, addResults, clearResults } = useUploadResults();
   const [uploading, setUploading] = useState(false);
-  const [results, setResults] = useState<UploadedDocument[]>([]);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<number | null>(null);
   const [flowOpen, setFlowOpen] = useState<number | null>(null);
   const [flowTab, setFlowTab] = useState<Record<number, FlowTab>>({});
+  const [exportingFlow, setExportingFlow] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = async (fileList: FileList | null) => {
@@ -60,8 +63,7 @@ export function Upload() {
     setError('');
     try {
       const docs = await uploadDocuments(files);
-      // Newest batch on top, keep previous results below.
-      setResults((prev) => [...docs, ...prev]);
+      addResults(docs);
     } catch (e) {
       setError(e instanceof Error ? e.message : '上傳失敗,請確認後端服務是否啟動。');
     } finally {
@@ -155,9 +157,14 @@ export function Upload() {
 
         {results.length > 0 && (
           <div style={{ marginTop: 28 }}>
-            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 16, color: 'var(--text-heading)', marginBottom: 14 }}>
-              解析結果({results.length})
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: 16, color: 'var(--text-heading)', margin: 0 }}>
+                解析結果({results.length})
+              </h2>
+              <button className="btn btn-outline" onClick={clearResults}>
+                清除結果
+              </button>
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {results.map((doc) => {
                 const failed = doc.status === 'failed';
@@ -278,43 +285,78 @@ export function Upload() {
                           const hasTwoCharts = asIs !== null && toBe !== null;
                           const tab = flowTab[doc.document_id] ?? 'to_be';
                           const activeChart = hasTwoCharts ? (tab === 'as_is' ? asIs : toBe) : (toBe ?? asIs ?? '');
-                          const modeLabel = hasTwoCharts ? 'AI 推斷 AS IS + TO BE' : doc.flowchart_mode === 'structured' ? '結構化解析' : doc.flowchart_mode === 'llm' ? 'AI 自動推斷' : '依章節推斷';
+                          const modeLabel =
+                            doc.flowchart_mode === 'structured+llm' ? '結構化 TO BE + AI 推斷 AS IS'
+                            : doc.flowchart_mode === 'llm' ? 'AI 自動推斷'
+                            : doc.flowchart_mode === 'structured' ? '結構化解析'
+                            : '依章節推斷';
+                          const exportKey = doc.document_id;
+                          const isExporting = exportingFlow === exportKey;
+                          const handleExport = async () => {
+                            setExportingFlow(exportKey);
+                            try {
+                              await exportFlowchartToPptx({
+                                chart: activeChart,
+                                title: hasTwoCharts ? (tab === 'as_is' ? 'AS IS 現況流程' : 'TO BE 目標流程') : '自動生成流程圖',
+                                subtitle: doc.filename,
+                                fileName: `${doc.filename.replace(/\.[^.]+$/, '')}_${hasTwoCharts ? (tab === 'as_is' ? 'ASIS' : 'TOBE') : 'flowchart'}.pptx`,
+                              });
+                            } catch (e) {
+                              setError(e instanceof Error ? e.message : '流程圖匯出失敗');
+                            } finally {
+                              setExportingFlow(null);
+                            }
+                          };
                           return (
                             <div style={{ marginTop: 12, padding: '16px', background: '#000000', border: '1px solid #333333', borderRadius: 10 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: 11, color: '#888888', fontFamily: 'var(--font-mono)' }}>
                                   生成模式:{modeLabel}
                                 </span>
-                                {hasTwoCharts && (
-                                  <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-                                    <button
-                                      style={{
-                                        padding: '4px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
-                                        border: '1px solid #d4a017',
-                                        background: tab === 'as_is' ? '#d4a017' : 'transparent',
-                                        color: tab === 'as_is' ? '#000' : '#d4a017',
-                                        fontFamily: '"Microsoft YaHei", "Noto Sans TC", sans-serif',
-                                        fontWeight: 700,
-                                      }}
-                                      onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'as_is' }))}
-                                    >
-                                      AS IS 現況
-                                    </button>
-                                    <button
-                                      style={{
-                                        padding: '4px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
-                                        border: '1px solid #d4a017',
-                                        background: tab === 'to_be' ? '#d4a017' : 'transparent',
-                                        color: tab === 'to_be' ? '#000' : '#d4a017',
-                                        fontFamily: '"Microsoft YaHei", "Noto Sans TC", sans-serif',
-                                        fontWeight: 700,
-                                      }}
-                                      onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'to_be' }))}
-                                    >
-                                      TO BE 目標
-                                    </button>
-                                  </div>
-                                )}
+                                <div style={{ display: 'flex', gap: 4, marginLeft: 'auto', flexWrap: 'wrap' }}>
+                                  {hasTwoCharts && (
+                                    <>
+                                      <button
+                                        style={{
+                                          padding: '4px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                                          border: '1px solid #d4a017',
+                                          background: tab === 'as_is' ? '#d4a017' : 'transparent',
+                                          color: tab === 'as_is' ? '#000' : '#d4a017',
+                                          fontFamily: '"Microsoft YaHei", "Noto Sans TC", sans-serif',
+                                          fontWeight: 700,
+                                        }}
+                                        onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'as_is' }))}
+                                      >
+                                        AS IS 現況
+                                      </button>
+                                      <button
+                                        style={{
+                                          padding: '4px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                                          border: '1px solid #d4a017',
+                                          background: tab === 'to_be' ? '#d4a017' : 'transparent',
+                                          color: tab === 'to_be' ? '#000' : '#d4a017',
+                                          fontFamily: '"Microsoft YaHei", "Noto Sans TC", sans-serif',
+                                          fontWeight: 700,
+                                        }}
+                                        onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'to_be' }))}
+                                      >
+                                        TO BE 目標
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    style={{
+                                      padding: '4px 14px', fontSize: 12, borderRadius: 6, cursor: isExporting ? 'default' : 'pointer',
+                                      border: '1px solid #666666', background: 'transparent', color: '#cccccc',
+                                      fontFamily: '"Microsoft YaHei", "Noto Sans TC", sans-serif', fontWeight: 700,
+                                      opacity: isExporting ? 0.6 : 1,
+                                    }}
+                                    disabled={isExporting}
+                                    onClick={() => void handleExport()}
+                                  >
+                                    {isExporting ? '匯出中…' : '⬇ 下載 PPT'}
+                                  </button>
+                                </div>
                               </div>
                               <Mermaid chart={activeChart} />
                             </div>

@@ -35,6 +35,16 @@ function loadMermaid(): Promise<MermaidApi> {
   return mermaidPromise;
 }
 
+let exportIdCounter = 0;
+
+// Shared by the inline <Mermaid> component and the PPT export button — both
+// need the same bold-Microsoft-YaHei-on-black rendering of a chart string.
+export async function renderMermaidSvg(chart: string): Promise<string> {
+  const mermaid = await loadMermaid();
+  const { svg } = await mermaid.render(`mmd-export-${exportIdCounter++}`, chart);
+  return svg.replace(/<text(\s)/g, '<text font-weight="700"$1');
+}
+
 export function Mermaid({ chart }: { chart: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const id = useId().replace(/:/g, '');

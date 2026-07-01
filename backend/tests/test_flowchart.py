@@ -36,7 +36,7 @@ def test_structured_parse_counts_nodes():
 def test_structured_mode_and_mermaid():
     result = generate_flowchart(STRUCTURED)
     assert result.mode == "structured"
-    assert result.mermaid.startswith("flowchart TD")
+    assert result.mermaid.startswith("flowchart LR")
     assert "S1([" in result.mermaid          # start = stadium
     assert "S3{" in result.mermaid           # decision = rhombus
     assert "-->|是|" in result.mermaid        # branch label
@@ -45,7 +45,7 @@ def test_structured_mode_and_mermaid():
 def test_inferred_fallback_from_headings():
     result = generate_flowchart(FREEFORM)
     assert result.mode == "inferred"
-    assert result.mermaid.startswith("flowchart TD")
+    assert result.mermaid.startswith("flowchart LR")
     # start + 5 sections + end
     assert result.node_count == 7
     assert "專案背景與目標" in result.mermaid
@@ -55,4 +55,4 @@ def test_empty_text_still_produces_minimal_flow():
     result = generate_flowchart("一段沒有任何標題或步驟的純文字內容。")
     assert result.mode == "inferred"
     assert result.node_count >= 3
-    assert result.mermaid.startswith("flowchart TD")
+    assert result.mermaid.startswith("flowchart LR")

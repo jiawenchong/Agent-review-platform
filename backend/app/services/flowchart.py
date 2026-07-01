@@ -120,8 +120,10 @@ def _infer_nodes(text: str) -> list[FlowNode]:
     return nodes
 
 
-def render_mermaid(nodes: list[FlowNode]) -> str:
-    lines = ["flowchart TD"]
+def render_mermaid(nodes: list[FlowNode], *, direction: str = "LR") -> str:
+    # LR (left-to-right) matches the reference blueprint diagrams the
+    # governance team draws by hand; TD reads as a long vertical scroll.
+    lines = [f"flowchart {direction}"]
     for n in nodes:
         open_b, close_b = _SHAPES.get(n.type, ("[", "]"))
         lines.append(f'    {n.id}{open_b}"{n.label}"{close_b}')
