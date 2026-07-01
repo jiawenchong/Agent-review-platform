@@ -32,6 +32,17 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+type FlowTab = 'as_is' | 'to_be';
+
+function parseFlowchart(raw: string | null): { asIs: string | null; toBe: string | null } {
+  if (!raw) return { asIs: null, toBe: null };
+  try {
+    const obj = JSON.parse(raw) as { as_is?: string; to_be?: string };
+    if (obj.as_is || obj.to_be) return { asIs: obj.as_is ?? null, toBe: obj.to_be ?? null };
+  } catch { /* plain Mermaid string */ }
+  return { asIs: null, toBe: raw };
+}
+
 export function Upload() {
   const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
@@ -39,6 +50,7 @@ export function Upload() {
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<number | null>(null);
   const [flowOpen, setFlowOpen] = useState<number | null>(null);
+  const [flowTab, setFlowTab] = useState<Record<number, FlowTab>>({});
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = async (fileList: FileList | null) => {
@@ -261,19 +273,41 @@ export function Upload() {
                             {doc.extracted_text}
                           </pre>
                         )}
-                        {flowOpen === doc.document_id && doc.flowchart_mermaid && (
-                          <div
-                            style={{
-                              marginTop: 12, padding: '16px', background: 'var(--surface-alt)',
-                              border: '1px solid var(--border-subtle)', borderRadius: 10,
-                            }}
-                          >
-                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, fontFamily: 'var(--font-mono)' }}>
-                              生成模式:{doc.flowchart_mode === 'structured' ? '結構化解析' : doc.flowchart_mode === 'llm' ? 'AI 自動推斷' : '依章節推斷'}
+                        {flowOpen === doc.document_id && doc.flowchart_mermaid && (() => {
+                          const { asIs, toBe } = parseFlowchart(doc.flowchart_mermaid);
+                          const hasTwoCharts = asIs !== null && toBe !== null;
+                          const tab = flowTab[doc.document_id] ?? 'to_be';
+                          const activeChart = hasTwoCharts ? (tab === 'as_is' ? asIs : toBe) : (toBe ?? asIs ?? '');
+                          const modeLabel = hasTwoCharts ? 'AI 推斷 AS IS + TO BE' : doc.flowchart_mode === 'structured' ? '結構化解析' : doc.flowchart_mode === 'llm' ? 'AI 自動推斷' : '依章節推斷';
+                          return (
+                            <div style={{ marginTop: 12, padding: '16px', background: 'var(--surface-alt)', border: '1px solid var(--border-subtle)', borderRadius: 10 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                                  生成模式:{modeLabel}
+                                </span>
+                                {hasTwoCharts && (
+                                  <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+                                    <button
+                                      className={`btn ${tab === 'as_is' ? 'btn-primary' : 'btn-outline'}`}
+                                      style={{ padding: '3px 12px', fontSize: 12 }}
+                                      onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'as_is' }))}
+                                    >
+                                      AS IS 現況
+                                    </button>
+                                    <button
+                                      className={`btn ${tab === 'to_be' ? 'btn-primary' : 'btn-outline'}`}
+                                      style={{ padding: '3px 12px', fontSize: 12 }}
+                                      onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'to_be' }))}
+                                    >
+                                      TO BE 目標
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                              <Mermaid chart={activeChart} />
                             </div>
-                            <Mermaid chart={doc.flowchart_mermaid} />
-                          </div>
-                        )}
+                          );
+                        })()}
                       </>
                     )}
                   </div>

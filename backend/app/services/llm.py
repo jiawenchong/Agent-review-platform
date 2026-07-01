@@ -254,6 +254,26 @@ def _parse_appeal(content: str) -> tuple[bool, str]:
     return reasonable, reason
 
 
+def _parse_flowchart_json(content: str) -> str | None:
+    """Try to extract {as_is, to_be} JSON from LLM flowchart response.
+
+    Returns a JSON string ready to store, or None if the response is not
+    in the expected two-chart format (caller falls back to single chart).
+    """
+    try:
+        obj = _extract_json_object(content)
+    except LLMUnavailable:
+        return None
+    as_is = obj.get("as_is") or obj.get("AS_IS") or obj.get("asIs")
+    to_be = obj.get("to_be") or obj.get("TO_BE") or obj.get("toBe")
+    if not (as_is and to_be):
+        return None
+    return json.dumps(
+        {"as_is": _clean_mermaid(str(as_is)), "to_be": _clean_mermaid(str(to_be))},
+        ensure_ascii=False,
+    )
+
+
 def _no_proxy_ssl_off_opener() -> urllib.request.OpenerDirector:
     """Opener that skips the outbound proxy and the self-signed cert check.
 
@@ -345,7 +365,7 @@ class ProphetAILLM:
         if len(structured) >= 2:
             return FlowchartResult(render_mermaid(structured), "structured", len(structured))
 
-        # 2 — Ask ProphetAI to read the document and draw the business flow.
+        # 2 — Ask ProphetAI to produce AS IS + TO BE in JSON.
         prompt = (
             prompts.flowchart_system_prompt()
             + "\n\n----\n\n"
@@ -353,6 +373,10 @@ class ProphetAILLM:
         )
         try:
             content = self._chat(prompt=prompt)
+            # Try the two-chart JSON format first; fall back to single Mermaid.
+            two_chart_json = _parse_flowchart_json(content)
+            if two_chart_json:
+                return FlowchartResult(two_chart_json, "llm", 0)
             mermaid = _clean_mermaid(content)
             return FlowchartResult(mermaid, "llm", mermaid.count("\n") + 1)
         except LLMUnavailable:
