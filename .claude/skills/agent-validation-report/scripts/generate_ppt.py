@@ -115,6 +115,15 @@ def find(slide, name):
     return None
 
 
+def _fill_indexed(slide, shape_names, values):
+    """Fill a list of shapes with corresponding values from a list.
+    Extra shapes are cleared; missing values leave shapes untouched."""
+    for i, name in enumerate(shape_names):
+        s = find(slide, name)
+        if s:
+            fill_tf(s, values[i] if i < len(values) else "")
+
+
 def tbl(slide, name):
     s = find(slide, name)
     return s.table if s and s.shape_type == 19 else None
@@ -143,7 +152,7 @@ def slide1(sl, d):
 
 
 def slide2(sl, d):
-    """Agent Goal Definition: project info table + metrics panel"""
+    """Agent Goal Definition: project info table + metrics panel + process flowchart"""
     t = tbl(sl, "表格 2")
     if t:
         fill_cell(t, 0, 1, v(d, "project_desc"))
@@ -160,6 +169,27 @@ def slide2(sl, d):
     s = find(sl, "文字方塊 10")
     if s:
         fill_tf(s, v(d, "project_metrics"))
+
+    # Bottom process flowchart: Trigger source label
+    s = find(sl, "文字方塊 176")
+    if s:
+        fill_tf(s, v(d, "trigger_source"))
+
+    # Perception phase boxes (矩形 129, 130)
+    perception = d.get("perception") or []
+    _fill_indexed(sl, ["矩形 129", "矩形 130"], perception)
+
+    # Reasoning phase boxes (矩形 9, 矩形 132, 矩形 133)
+    reasoning = d.get("reasoning") or []
+    _fill_indexed(sl, ["矩形 9", "矩形 132", "矩形 133"], reasoning)
+
+    # Action phase boxes (矩形 134, 矩形 135, 矩形 136)
+    action = d.get("action") or []
+    _fill_indexed(sl, ["矩形 134", "矩形 135", "矩形 136"], action)
+
+    # Feedback phase boxes (矩形 137, 矩形 138, 矩形 5)
+    feedback = d.get("feedback") or []
+    _fill_indexed(sl, ["矩形 137", "矩形 138", "矩形 5"], feedback)
 
 
 def slide3(sl, d):
@@ -189,18 +219,54 @@ def slide3(sl, d):
 
 
 def slide4(sl, d):
-    """Decision Logic: left table (Tasks / Sub-Agent / Logic / Tools).
-    Right-side Decision Flow diagram shapes are static — left untouched."""
+    """Decision Logic: left table + right-side Decision Flow diagram."""
     t = tbl(sl, "表格 137")
-    if not t:
-        return
-    fill_cell(t, 1, 0, v(d, "tasks"))
-    fill_cell(t, 1, 1, v(d, "sub_agent"))
-    fill_cell(t, 1, 2, v(d, "logic"))
-    fill_cell(t, 1, 3, v(d, "logic_tools"))
-    for r in range(2, min(len(t.rows), 5)):
-        for c in range(min(len(t.columns), 4)):
-            fill_cell(t, r, c, "")
+    if t:
+        fill_cell(t, 1, 0, v(d, "tasks"))
+        fill_cell(t, 1, 1, v(d, "sub_agent"))
+        fill_cell(t, 1, 2, v(d, "logic"))
+        fill_cell(t, 1, 3, v(d, "logic_tools"))
+        for r in range(2, min(len(t.rows), 5)):
+            for c in range(min(len(t.columns), 4)):
+                fill_cell(t, r, c, "")
+
+    # Right side: Decision Flow text boxes
+    # 文字方塊 3 has two paragraphs: Trigger line + Perception line
+    s = find(sl, "文字方塊 3")
+    if s:
+        fill_tf_lines(
+            s,
+            f"Trigger: {v(d, 'decision_trigger')}",
+            f"Perception: {v(d, 'decision_perception')}",
+        )
+
+    s = find(sl, "文字方塊 4")
+    if s:
+        fill_tf(s, v(d, "decision_q1"))
+
+    s = find(sl, "文字方塊 6")
+    if s:
+        fill_tf(s, v(d, "decision_q1_no_result"))
+
+    s = find(sl, "文字方塊 7")
+    if s:
+        fill_tf(s, v(d, "decision_q2"))
+
+    s = find(sl, "文字方塊 9")
+    if s:
+        fill_tf(s, v(d, "decision_q2_no_result"))
+
+    s = find(sl, "文字方塊 10")
+    if s:
+        fill_tf(s, v(d, "decision_q3"))
+
+    s = find(sl, "文字方塊 12")
+    if s:
+        fill_tf(s, v(d, "decision_q3_no_result"))
+
+    s = find(sl, "文字方塊 64")
+    if s:
+        fill_tf(s, v(d, "decision_q3_yes_result"))
 
 
 def slide5(sl, d):
