@@ -17,10 +17,11 @@ description: >
 ## 檔案結構
 
 ```
-reference/template_structure.json   版面結構與配色規則(single source of truth)
-reference/input_data.example.json   範例輸入資料,對照 10 頁各自需要哪些欄位
-reference/prompt.md                 LLM prompt:原始資料 → 結構化 JSON(見下方「用 LLM 產生輸入資料」)
-scripts/generate_ppt.py             產生器,讀 template_structure.json + 輸入 JSON → .pptx
+reference/template_structure.json      版面結構與配色規則(single source of truth)
+reference/input_data.example.json      範例輸入資料,對照 10 頁各自需要哪些欄位
+reference/prompt.md                    LLM prompt:原始資料 → 結構化 JSON
+reference/test_source_material.example.txt   測試用原始資料(會議記錄格式),拿去餵 prompt.md 用
+scripts/generate_ppt.py                產生器,讀 template_structure.json + 輸入 JSON → .pptx
 ```
 
 ## 完整流程
