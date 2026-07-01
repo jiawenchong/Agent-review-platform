@@ -54,6 +54,8 @@ _ENV_FLOWCHART_KEY     = "COMPANY_FLOWCHART_KEY"       # 流程圖生成 API key
 _ENV_FLOWCHART_AGENT   = "COMPANY_FLOWCHART_AGENT"     # 流程圖生成 agent id (AS IS + TO BE)
 _ENV_APPEAL_KEY        = "COMPANY_APPEAL_KEY"          # 申訴合理性 API key
 _ENV_APPEAL_AGENT      = "COMPANY_APPEAL_AGENT"        # 申訴合理性 agent id (closed-loop)
+_ENV_VALIDATION_KEY    = "COMPANY_VALIDATION_KEY"      # 驗證報告訪談 API key
+_ENV_VALIDATION_AGENT  = "COMPANY_VALIDATION_AGENT"    # 驗證報告訪談 agent id
 
 # Backward-compat: a single-agent setup can still set these two instead of
 # the six task-specific vars above; every task falls back to them.
@@ -62,9 +64,10 @@ _ENV_LEGACY_AGENT      = "COMPANY_LLM_AGENT"
 
 # (task_key_env, task_agent_env) tuples, keyed by task name.
 _TASK_CREDENTIALS = {
-    "review": (_ENV_REVIEW_KEY, _ENV_REVIEW_AGENT),
-    "flowchart": (_ENV_FLOWCHART_KEY, _ENV_FLOWCHART_AGENT),
-    "appeal": (_ENV_APPEAL_KEY, _ENV_APPEAL_AGENT),
+    "review":     (_ENV_REVIEW_KEY,     _ENV_REVIEW_AGENT),
+    "flowchart":  (_ENV_FLOWCHART_KEY,  _ENV_FLOWCHART_AGENT),
+    "appeal":     (_ENV_APPEAL_KEY,     _ENV_APPEAL_AGENT),
+    "validation": (_ENV_VALIDATION_KEY, _ENV_VALIDATION_AGENT),
 }
 
 
@@ -488,6 +491,74 @@ class ProphetAILLM:
             grounding_violation=False,  # prompt instructs: only cite supplied context
             contradiction_with_data=contradiction,
         )
+
+
+    def chat_multi_turn(
+        self,
+        *,
+        system: str,
+        messages: list[dict],
+        task: str = "review",
+    ) -> str:
+        """Multi-turn conversation with full message history.
+
+        messages = [{"role": "user"|"assistant", "content": str}, ...]
+
+        Prepends the system prompt as a [SYSTEM] block in the first user turn
+        so it works with any ProphetAI agent configuration.
+        """
+        api_key, agent_id = self._resolve_credentials(task)
+        key_env, agent_env = _TASK_CREDENTIALS[task]
+        if not api_key or not agent_id:
+            raise LLMUnavailable(
+                f"{key_env} / {agent_env} 未設定(請在 host 本機環境變數填入,勿 commit)。"
+            )
+
+        api_messages: list[dict] = []
+        if system:
+            api_messages.append({
+                "role": "user",
+                "content": [{"type": "text", "text": f"[SYSTEM]\n{system}\n[/SYSTEM]"}],
+            })
+            api_messages.append({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "好的，我了解了。請開始。"}],
+            })
+
+        for msg in messages:
+            api_messages.append({
+                "role": msg.get("role", "user"),
+                "content": [{"type": "text", "text": str(msg.get("content", ""))}],
+            })
+
+        payload = json.dumps(
+            {"model": agent_id, "messages": api_messages, "temperature": 0.7},
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+        req = urllib.request.Request(
+            settings.llm_endpoint,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+        )
+        opener = _no_proxy_ssl_off_opener()
+        try:
+            with opener.open(req, timeout=settings.llm_timeout_seconds) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.URLError as exc:
+            raise LLMUnavailable(f"ProphetAI 連線失敗: {exc}") from exc
+
+        choices = data.get("choices") or []
+        if not choices:
+            raise LLMUnavailable("ProphetAI 回傳空回應 (no choices)")
+        content = choices[0].get("message", {}).get("content", "")
+        if isinstance(content, list):
+            parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+            content = "".join(parts)
+        return content.strip()
 
 
 def _task_credentials_present(task: str) -> bool:

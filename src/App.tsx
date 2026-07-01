@@ -8,6 +8,7 @@ import { Upload } from './pages/Upload';
 import { Notifications } from './pages/Notifications';
 import { Report } from './pages/Report';
 import { AuditLog } from './pages/AuditLog';
+import { ValidationReport } from './pages/ValidationReport';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/report" element={<Report />} />
             <Route path="/audit" element={<AuditLog />} />
+            <Route path="/validation-report" element={<ValidationReport />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>

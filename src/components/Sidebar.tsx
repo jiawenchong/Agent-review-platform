@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { num: '04', label: '通知中心', to: '/notifications', showBadge: true },
   { num: '05', label: '治理月報', to: '/report' },
   { num: '06', label: '紅線稽核紀錄', to: '/audit' },
+  { num: '07', label: 'AI 驗證報告', to: '/validation-report' },
 ];
 
 export function Sidebar() {

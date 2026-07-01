@@ -82,3 +82,10 @@ def flowchart_system_prompt() -> str:
 
 def flowchart_user_prompt(*, filename: str, markdown: str) -> str:
     return _load("flowchart_generation.md")[1].format(filename=filename, markdown=markdown)
+
+
+# ── validation report interview (AI 訪談驗證報告) ────────────────────────
+
+
+def validation_interview_system_prompt() -> str:
+    return _load("validation_report_interview.md")[0]

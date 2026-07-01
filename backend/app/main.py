@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import Base, SessionLocal, engine
-from .routers import appeals, guardrails, notifications, projects, reports, scan, uploads, users
+from .routers import appeals, guardrails, notifications, projects, reports, scan, uploads, users, validation_report
 from .scheduler import next_scan_at, shutdown_scheduler, start_scheduler
 from .seed import seed
 from .services.llm import configured_tasks, using_stub_llm
@@ -77,6 +77,7 @@ app.include_router(notifications.router)
 app.include_router(guardrails.router)
 app.include_router(reports.router)
 app.include_router(scan.router)
+app.include_router(validation_report.router)
 
 
 @app.get("/api/health", tags=["health"])
