@@ -1,33 +1,18 @@
 // API client for the FastAPI backend. Override the base URL with
 // VITE_API_BASE at build/dev time.
 //
-// Every endpoint except /api/uploads and /api/users requires an
-// `X-User-Id` header (Information Isolation ACL). Real login (P1 on the
-// roadmap) isn't built yet, so we keep a "current user" id in
-// localStorage and let the user switch identities from the sidebar to
-// exercise the ACL — this is an interim stand-in, not a real auth system.
+// Authentication uses an httpOnly JWT cookie set by POST /api/auth/login.
+// All requests include credentials:'include' so the browser sends the cookie.
 import type { GuardrailType, ProjectStatus } from '../data/types';
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8010';
-
-const CURRENT_USER_KEY = 'governance.currentUserId';
-const DEFAULT_USER_ID = 'U-mgr';
-
-export function getCurrentUserId(): string {
-  return localStorage.getItem(CURRENT_USER_KEY) || DEFAULT_USER_ID;
-}
-
-export function setCurrentUserId(id: string): void {
-  localStorage.setItem(CURRENT_USER_KEY, id);
-}
+const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set('X-User-Id', getCurrentUserId());
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' });
   if (!res.ok) {
     let detail = `請求失敗(HTTP ${res.status})`;
     try {

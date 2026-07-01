@@ -38,5 +38,17 @@ class Settings(BaseSettings):
     rag_backend: str = "memory"          # memory | pgvector | faiss
     notification_channel: str = "inapp"  # inapp | email | teams
 
+    # --- Active Directory (LDAPS SIMPLE bind) ---
+    # Leave ad_server empty to skip LDAP and fall back to local bcrypt hash only.
+    ad_server: str = ""           # AD host IP / FQDN, e.g. "10.10.10.2"
+    ad_port: int = 636            # 636 = LDAPS; 389 = plain LDAP (not recommended)
+    ad_use_ssl: bool = True
+    ad_tls_verify: bool = False   # False = accept self-signed internal CA (common on-prem)
+    ad_upn_suffix: str = ""       # UPN suffix, e.g. "kh.asegroup.com" → empno@kh.asegroup.com
+
+    # --- JWT session cookie ---
+    jwt_expire_hours: int = 8     # Token lifetime; 8 h = one work day
+    auth_cookie_secure: bool = False  # Set True when serving over HTTPS in production
+
 
 settings = Settings()

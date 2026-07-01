@@ -199,10 +199,14 @@ class Document(Base):
 
 
 class User(Base):
-    """Minimal user/ACL table backing the Information Isolation guardrail.
+    """User/ACL table backing the Information Isolation guardrail and AD auth.
 
     `project_ids` is the access-control list: which projects this principal
     may read. `is_manager` marks human managers that escalations route to.
+
+    AD login fields (`empno`, `role`, `email`, `password_hash`) are nullable
+    so existing rows created before authentication was added remain valid.
+    They are populated on first successful AD login (auto-create) or by admin.
     """
 
     __tablename__ = "users"
@@ -211,3 +215,21 @@ class User(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     is_manager: Mapped[bool] = mapped_column(Boolean, default=False)
     project_ids: Mapped[list] = mapped_column(JSON, default=list)
+
+    # AD authentication additions (added via ALTER TABLE on existing DBs)
+    empno: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
+    role: Mapped[str | None] = mapped_column(String, nullable=True, default="member")
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class LoginLog(Base):
+    """Records every successful login for the activity dashboard."""
+
+    __tablename__ = "login_logs"
+
+    log_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    empno: Mapped[str] = mapped_column(String, nullable=False)
+    ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    logged_in_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

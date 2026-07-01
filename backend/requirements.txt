@@ -10,6 +10,10 @@ python-multipart>=0.0.9
 # PDF intentionally excluded - see app/services/extraction.py docstring
 python-docx>=1.1
 python-pptx>=0.6
+# AD auth + JWT + bcrypt
+ldap3>=2.9
+PyJWT>=2.9
+bcrypt>=4.1
 # dev / test (ProphetAI connector uses stdlib urllib; httpx is for TestClient)
 httpx>=0.27
 pytest>=8.0

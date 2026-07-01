@@ -1,17 +1,15 @@
-"""Shared dependencies — including the Information Isolation guardrail (§八).
+"""Shared FastAPI dependencies.
 
-The ACL check runs at the API layer: every project-scoped query first passes
-through `require_project_access`, which consults the caller's ACL and writes
-an Information-Isolation guardrail event on denial, exactly as the spec
-requires ("所有查詢先過 ACL 檢查,未授權直接拒絕").
+current_user() reads the signed JWT from the httpOnly 'govern_auth' cookie
+set by POST /api/auth/login. All project-scoped endpoints call this via
+Depends() to enforce authentication.
 
-The current principal is taken from the ``X-User-Id`` header. Real
-deployments would replace this with proper auth; the contract (a user id +
-its ACL) stays the same.
+The Information Isolation guardrail (§八) is enforced by require_project_access:
+managers and admins see all projects; regular members only see their own.
 """
 from __future__ import annotations
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from .database import get_db
@@ -20,20 +18,34 @@ from .services.guardrails import record_event
 
 
 def current_user(
-    x_user_id: str | None = Header(default=None),
+    request: Request,
     db: Session = Depends(get_db),
 ) -> User:
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="缺少 X-User-Id")
-    user = db.get(User, x_user_id)
+    from .services.auth_service import COOKIE_NAME, decode_token
+    import jwt as pyjwt
+
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="未登入，請先至登入頁面")
+
+    try:
+        payload = decode_token(token)
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="登入已過期，請重新登入")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token 無效，請重新登入")
+
+    user_id = payload.get("sub")
+    user = db.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=401, detail="未知使用者")
+        raise HTTPException(status_code=401, detail="使用者不存在")
     return user
 
 
 def require_project_access(project_id: str, user: User, db: Session) -> None:
-    """ACL gate. Managers see everything; others only their listed projects."""
-    if user.is_manager or project_id in (user.project_ids or []):
+    """ACL gate. Admins/managers see everything; members only their listed projects."""
+    is_elevated = user.is_manager or (user.role in ("admin", "manager"))
+    if is_elevated or project_id in (user.project_ids or []):
         return
     record_event(
         db,

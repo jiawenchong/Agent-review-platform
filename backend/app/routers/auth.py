@@ -1,0 +1,231 @@
+"""Authentication endpoints: login, logout, me.
+
+Security design
+  · Passwords are never logged.
+  · Rate limiter: 5 failures per 15 min per IP → 429.
+  · LDAP input is sanitised with a strict allowlist regex before the bind.
+  · JWT is stored in an httpOnly SameSite=Lax cookie — invisible to JS.
+  · AD bind failure (network / TLS) causes silent fallback to bcrypt hash;
+    wrong-password AD responses cause immediate 401 (no fallback).
+  · Auto-create: first successful AD login creates a User row with role=member.
+"""
+from __future__ import annotations
+
+import re
+import time
+from collections import defaultdict
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from ..config import settings
+from ..database import get_db
+from ..models import LoginLog, User
+from ..services import ad_auth
+from ..services.auth_service import (
+    COOKIE_NAME,
+    create_token,
+    verify_password,
+)
+
+router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# ── rate limiter (in-memory, per IP) ────────────────────────────────────────
+
+_FAIL_WINDOW_SEC = 900   # 15 minutes
+_FAIL_LIMIT = 5
+_fail_log: dict[str, list[float]] = defaultdict(list)
+
+
+def _rate_check(ip: str) -> None:
+    now = time.monotonic()
+    recent = [t for t in _fail_log[ip] if now - t < _FAIL_WINDOW_SEC]
+    _fail_log[ip] = recent
+    if len(recent) >= _FAIL_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"登入失敗次數過多，請 {_FAIL_WINDOW_SEC // 60} 分鐘後再試。",
+        )
+
+
+def _rate_fail(ip: str) -> None:
+    _fail_log[ip].append(time.monotonic())
+
+
+def _rate_ok(ip: str) -> None:
+    _fail_log.pop(ip, None)
+
+
+# ── schemas ──────────────────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    empno: str
+    password: str
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+_EMPNO_RE = re.compile(r'^[a-zA-Z0-9_.\-]+$')
+
+
+def _effective_role(user: User) -> str:
+    if user.role:
+        return user.role
+    return "manager" if user.is_manager else "member"
+
+
+# ── endpoints ────────────────────────────────────────────────────────────────
+
+
+@router.post("/login")
+def login(
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> dict:
+    ip = (request.client.host if request.client else "unknown")
+    _rate_check(ip)
+
+    empno = body.empno.strip()
+    if not _EMPNO_RE.match(empno):
+        _rate_fail(ip)
+        raise HTTPException(status_code=400, detail="員工編號格式不正確")
+    if not body.password:
+        raise HTTPException(status_code=400, detail="請輸入密碼")
+
+    user: User | None = db.query(User).filter(User.empno == empno).first()
+    authenticated = False
+
+    # ── Step 1: try AD (LDAPS SIMPLE bind) ──────────────────────────────────
+    if settings.ad_server and settings.ad_upn_suffix:
+        try:
+            ok = ad_auth.verify_ad_password(
+                empno,
+                body.password,
+                server=settings.ad_server,
+                port=settings.ad_port,
+                use_ssl=settings.ad_use_ssl,
+                tls_verify=settings.ad_tls_verify,
+                upn_suffix=settings.ad_upn_suffix,
+            )
+            if ok:
+                authenticated = True
+            else:
+                # AD said "invalid credentials" — definitive failure, no fallback.
+                _rate_fail(ip)
+                raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
+        except HTTPException:
+            raise
+        except Exception:
+            # AD unreachable → fall through to local bcrypt hash.
+            pass
+
+    # ── Step 2: fallback to bcrypt hash ──────────────────────────────────────
+    if not authenticated:
+        if not user or not user.password_hash:
+            _rate_fail(ip)
+            raise HTTPException(
+                status_code=401,
+                detail="帳號或密碼錯誤" if settings.ad_server else "帳號不存在或尚未設定密碼",
+            )
+        if not verify_password(body.password, user.password_hash):
+            _rate_fail(ip)
+            raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
+        authenticated = True
+
+    # ── Auto-create user on first successful AD login ────────────────────────
+    if user is None:
+        user = User(
+            user_id=empno,
+            name=empno,
+            empno=empno,
+            role="member",
+            is_manager=False,
+            project_ids=[],
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    # Backfill empno for pre-existing users that didn't have it set.
+    if not user.empno:
+        user.empno = empno
+        db.commit()
+
+    # ── Write login log (best-effort, never blocks login) ────────────────────
+    try:
+        db.add(LoginLog(
+            user_id=user.user_id,
+            empno=empno,
+            ip=ip,
+            logged_in_at=datetime.utcnow(),
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    # ── Issue httpOnly JWT cookie ─────────────────────────────────────────────
+    _rate_ok(ip)
+    role = _effective_role(user)
+    token = create_token(
+        user_id=user.user_id,
+        role=role,
+        name=user.name,
+        expire_hours=settings.jwt_expire_hours,
+    )
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.auth_cookie_secure,
+        max_age=settings.jwt_expire_hours * 3600,
+        path="/",
+    )
+    return {
+        "user_id": user.user_id,
+        "name": user.name,
+        "role": role,
+        "empno": user.empno,
+    }
+
+
+@router.post("/logout")
+def logout(response: Response) -> dict:
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        samesite="lax",
+        secure=settings.auth_cookie_secure,
+        path="/",
+    )
+    return {"ok": True}
+
+
+@router.get("/me")
+def me(request: Request, db: Session = Depends(get_db)) -> dict:
+    from ..services.auth_service import decode_token
+
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="未登入")
+    try:
+        payload = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token 無效或已過期，請重新登入")
+
+    user_id = payload.get("sub")
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="使用者不存在")
+
+    return {
+        "user_id": user.user_id,
+        "name": user.name,
+        "role": _effective_role(user),
+        "empno": user.empno,
+        "email": user.email,
+    }

@@ -4,7 +4,6 @@ import { PageHeader } from '../components/PageHeader';
 import { StatusPill } from '../components/StatusPill';
 import { scoreColor } from '../data/styleMaps';
 import {
-  getCurrentUserId,
   getProject,
   listAppeals,
   listSnapshots,
@@ -16,6 +15,7 @@ import {
   type ApiSnapshot,
   type ApiUser,
 } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 function formatTs(iso: string): string {
   return new Date(iso).toLocaleString('zh-TW', { hour12: false });
@@ -33,6 +33,7 @@ const SECTION_TITLE_STYLE = {
 export function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [project, setProject] = useState<ApiProject | null>(null);
   const [snapshots, setSnapshots] = useState<ApiSnapshot[]>([]);
   const [appeals, setAppeals] = useState<ApiAppeal[]>([]);
@@ -71,7 +72,7 @@ export function ProjectDetail() {
     if (!id || !appealText.trim()) return;
     setSubmitting(true);
     try {
-      const appeal = await submitAppeal(id, appealText.trim(), getCurrentUserId());
+      const appeal = await submitAppeal(id, appealText.trim(), user?.user_id ?? '');
       setAppeals((prev) => [appeal, ...prev]);
       setAppealText('');
     } catch (e) {

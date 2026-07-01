@@ -23,15 +23,44 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import Base, SessionLocal, engine
-from .routers import appeals, guardrails, notifications, projects, reports, scan, uploads, users, validation_report
+from .routers import appeals, auth, guardrails, notifications, projects, reports, scan, uploads, users, validation_report
 from .scheduler import next_scan_at, shutdown_scheduler, start_scheduler
 from .seed import seed
 from .services.llm import configured_tasks, using_stub_llm
 
 
+def _migrate_user_columns() -> None:
+    """Add AD-auth columns to the users table if they don't exist yet.
+
+    SQLAlchemy's create_all() does not ALTER existing tables, so new columns
+    on the User model must be added manually on first startup after upgrade.
+    This runs on every startup but each ALTER is skipped if the column exists.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return  # table not created yet; create_all() will handle it below
+    existing = {col["name"] for col in inspector.get_columns("users")}
+    statements = []
+    if "empno" not in existing:
+        statements.append("ALTER TABLE users ADD COLUMN empno VARCHAR")
+    if "role" not in existing:
+        statements.append("ALTER TABLE users ADD COLUMN role VARCHAR DEFAULT 'member'")
+    if "email" not in existing:
+        statements.append("ALTER TABLE users ADD COLUMN email VARCHAR")
+    if "password_hash" not in existing:
+        statements.append("ALTER TABLE users ADD COLUMN password_hash VARCHAR")
+    if statements:
+        with engine.begin() as conn:
+            for stmt in statements:
+                conn.execute(text(stmt))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    _migrate_user_columns()          # non-destructive schema migration
+    Base.metadata.create_all(bind=engine)  # creates login_logs + any missing tables
     if settings.seed_on_startup:
         db = SessionLocal()
         try:
@@ -61,14 +90,18 @@ _PRIVATE_NETWORK_ORIGIN_REGEX = (
     r"|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?"
 )
 
+# allow_credentials=True is required for the httpOnly auth cookie to be
+# included in cross-origin requests (Vite dev-server → uvicorn backend).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:5180"],
     allow_origin_regex=_PRIVATE_NETWORK_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
+app.include_router(auth.router)          # /api/auth/*  — must be first (no auth guard)
 app.include_router(uploads.router)
 app.include_router(users.router)
 app.include_router(projects.router)

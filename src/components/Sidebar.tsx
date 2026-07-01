@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useNotifications } from '../context/NotificationContext';
-import { getCurrentUserId, listUsers, setCurrentUserId, type ApiUser } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 const NAV_ITEMS = [
   { num: '01', label: '規劃書評估', to: '/upload' },
@@ -14,11 +13,14 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const { unreadCount } = useNotifications();
-  const [users, setUsers] = useState<ApiUser[]>([]);
+  const { user, isManager, logout } = useAuth();
 
-  useEffect(() => {
-    listUsers().then(setUsers).catch(() => setUsers([]));
-  }, []);
+  const handleLogout = async () => {
+    await logout();
+    window.location.href = '/login';
+  };
+
+  const roleBadge = isManager ? '主管' : '成員';
 
   return (
     <aside className="sidebar">
@@ -40,23 +42,21 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      {users.length > 0 && (
-        <div className="sidebar-user-switch">
-          <div className="sidebar-user-switch-label">目前身分(暫代登入)</div>
-          <select
-            className="sidebar-user-select"
-            value={getCurrentUserId()}
-            onChange={(e) => {
-              setCurrentUserId(e.target.value);
-              window.location.reload();
-            }}
-          >
-            {users.map((u) => (
-              <option key={u.user_id} value={u.user_id}>
-                {u.name}{u.is_manager ? '(主管)' : ''}
-              </option>
-            ))}
-          </select>
+      {user && (
+        <div className="sidebar-user">
+          <div className="sidebar-user-info">
+            <div className="sidebar-user-name">{user.name}</div>
+            <div className="sidebar-user-meta">
+              {user.empno && <span className="sidebar-user-empno">{user.empno}</span>}
+              <span className="sidebar-user-role">{roleBadge}</span>
+            </div>
+          </div>
+          <button className="sidebar-logout-btn" onClick={handleLogout} title="登出">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3v-1.5H3.5v-9H6V2zm4.78 3.72l2.53 2.53-2.53 2.53-1.06-1.06 1.22-1.22H6V7h4.94l-1.22-1.22 1.06-1.06z" />
+            </svg>
+            登出
+          </button>
         </div>
       )}
       <div className="sidebar-footer">
