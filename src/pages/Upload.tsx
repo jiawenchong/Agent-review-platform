@@ -280,23 +280,35 @@ export function Upload() {
                           const activeChart = hasTwoCharts ? (tab === 'as_is' ? asIs : toBe) : (toBe ?? asIs ?? '');
                           const modeLabel = hasTwoCharts ? 'AI 推斷 AS IS + TO BE' : doc.flowchart_mode === 'structured' ? '結構化解析' : doc.flowchart_mode === 'llm' ? 'AI 自動推斷' : '依章節推斷';
                           return (
-                            <div style={{ marginTop: 12, padding: '16px', background: 'var(--surface-alt)', border: '1px solid var(--border-subtle)', borderRadius: 10 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                            <div style={{ marginTop: 12, padding: '16px', background: '#000000', border: '1px solid #333333', borderRadius: 10 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 11, color: '#888888', fontFamily: 'var(--font-mono)' }}>
                                   生成模式:{modeLabel}
                                 </span>
                                 {hasTwoCharts && (
                                   <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
                                     <button
-                                      className={`btn ${tab === 'as_is' ? 'btn-primary' : 'btn-outline'}`}
-                                      style={{ padding: '3px 12px', fontSize: 12 }}
+                                      style={{
+                                        padding: '4px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                                        border: '1px solid #d4a017',
+                                        background: tab === 'as_is' ? '#d4a017' : 'transparent',
+                                        color: tab === 'as_is' ? '#000' : '#d4a017',
+                                        fontFamily: '"Microsoft YaHei", "Noto Sans TC", sans-serif',
+                                        fontWeight: 700,
+                                      }}
                                       onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'as_is' }))}
                                     >
                                       AS IS 現況
                                     </button>
                                     <button
-                                      className={`btn ${tab === 'to_be' ? 'btn-primary' : 'btn-outline'}`}
-                                      style={{ padding: '3px 12px', fontSize: 12 }}
+                                      style={{
+                                        padding: '4px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                                        border: '1px solid #d4a017',
+                                        background: tab === 'to_be' ? '#d4a017' : 'transparent',
+                                        color: tab === 'to_be' ? '#000' : '#d4a017',
+                                        fontFamily: '"Microsoft YaHei", "Noto Sans TC", sans-serif',
+                                        fontWeight: 700,
+                                      }}
                                       onClick={() => setFlowTab(prev => ({ ...prev, [doc.document_id]: 'to_be' }))}
                                     >
                                       TO BE 目標

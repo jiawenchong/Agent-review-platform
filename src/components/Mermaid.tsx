@@ -10,14 +10,22 @@ function loadMermaid(): Promise<MermaidApi> {
     mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
       mermaid.initialize({
         startOnLoad: false,
-        theme: 'base',
+        theme: 'dark',
         securityLevel: 'strict',
-        fontFamily: "'Inter', 'Noto Sans TC', sans-serif",
+        fontFamily: '"Microsoft YaHei", "微軟正黑體", "Noto Sans TC", sans-serif',
         themeVariables: {
-          primaryColor: '#e6efeb',
-          primaryBorderColor: '#1f4d3c',
-          primaryTextColor: '#2b2620',
-          lineColor: '#936639',
+          background: '#000000',
+          mainBkg: '#1a1a1a',
+          primaryColor: '#1e1e1e',
+          primaryBorderColor: '#cccccc',
+          primaryTextColor: '#ffffff',
+          secondaryColor: '#111111',
+          tertiaryColor: '#1a1a1a',
+          lineColor: '#888888',
+          edgeLabelBackground: '#1a1a1a',
+          clusterBkg: '#0d0d0d',
+          clusterBorder: '#d4a017',   // gold border — matches PPT yellow subgraph frames
+          titleColor: '#d4a017',
           fontSize: '13px',
         },
       });
@@ -38,7 +46,12 @@ export function Mermaid({ chart }: { chart: string }) {
       .then((mermaid) => mermaid.render(`mmd-${id}`, chart))
       .then(({ svg }) => {
         if (cancelled) return;
-        if (ref.current) ref.current.innerHTML = svg;
+        if (ref.current) {
+          // Inject font-weight="700" into every SVG <text> element so
+          // Microsoft YaHei renders bold, matching the user's PPT reference.
+          const boldSvg = svg.replace(/<text(\s)/g, '<text font-weight="700"$1');
+          ref.current.innerHTML = boldSvg;
+        }
         setError('');
       })
       .catch((e: unknown) => {
@@ -54,7 +67,7 @@ export function Mermaid({ chart }: { chart: string }) {
       <pre
         style={{
           whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)', fontSize: 12,
-          background: 'var(--surface-alt)', borderRadius: 10, padding: '12px 14px', color: 'var(--red-text)',
+          background: '#111', borderRadius: 10, padding: '12px 14px', color: '#ff6b6b',
         }}
       >
         {error}
