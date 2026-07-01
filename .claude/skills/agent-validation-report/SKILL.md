@@ -19,8 +19,23 @@ description: >
 ```
 reference/template_structure.json   版面結構與配色規則(single source of truth)
 reference/input_data.example.json   範例輸入資料,對照 10 頁各自需要哪些欄位
+reference/prompt.md                 LLM prompt:原始資料 → 結構化 JSON(見下方「用 LLM 產生輸入資料」)
 scripts/generate_ppt.py             產生器,讀 template_structure.json + 輸入 JSON → .pptx
 ```
+
+## 完整流程
+
+```
+原始資料(會議記錄/測試結果/Guardrail設計/Q&A)
+    ↓
+ProphetAI LLM(reference/prompt.md)→ 結構化 JSON(對照 input_data.example.json)
+    ↓
+scripts/generate_ppt.py → .pptx
+```
+
+`reference/prompt.md` **目前尚未接進網頁後端**,先當獨立 skill 用:把 prompt 貼進 ProphetAI
+後台設定一個新 agent(專門做「驗證報告資料整理」這件事),測試沒問題、agent id 跟 API key
+都拿到之後,才會進一步討論要不要在網頁做一個獨立頁面把這串流程接起來。
 
 ## 視覺風格規範
 
