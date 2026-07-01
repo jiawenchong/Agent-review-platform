@@ -14,8 +14,11 @@ node_modules
 dist-ssr
 *.local
 
-# Real ProphetAI credentials — NEVER commit. Copy credentials.bat.example →
-# credentials.bat (or .sh) and fill in locally; only the .example is tracked.
+# Real ProphetAI credentials — NEVER commit. Copy credentials.env.example →
+# credentials.env (recommended: fill once, auto-loaded on every future start)
+# or credentials.bat/.sh (manual `set`/`source` each launch) and fill in
+# locally; only the .example files are tracked.
+backend/credentials.env
 backend/credentials.bat
 backend/credentials.sh
 

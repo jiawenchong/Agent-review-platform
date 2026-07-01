@@ -28,10 +28,20 @@ import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from ..config import settings
 from . import prompts
 from .connectors import RagHit, rag
+
+# Load backend/credentials.env once at import time, so credentials filled in
+# there are picked up automatically on every future launch — no need to `set`
+# env vars or re-run a script each time. The file is gitignored (never
+# committed); only credentials.env.example (blank) is tracked.
+# override=False: real host env vars (if already set) always win.
+load_dotenv(Path(__file__).resolve().parents[2] / "credentials.env", override=False)
 
 # Host-only credentials (see .claude/skills/prophetai-api). Never committed:
 # the repo leaves these empty and the host machine fills them via env vars.

@@ -72,13 +72,15 @@ scripts/
 
 三個任務（審核 / 流程圖生成 / 申訴合理性）各自是獨立的 ProphetAI Agent，**各自有自己的金鑰與 agent id，不共用**。
 
-**金鑰絕對不能 commit**。複製 `backend/credentials.bat.example` → `backend/credentials.bat`（已 gitignore）填入後執行：
+**金鑰絕對不能 commit**。複製 `backend/credentials.env.example` → `backend/credentials.env`（已 gitignore），
+填入後存檔即可 — **只需填一次**，之後每次啟動後端（`uvicorn` / `start-lan.bat`）都會自動讀取這個檔案
+（`llm.py` 頂部 `load_dotenv()`），不用再手動 `set` 或每次啟動前執行腳本：
 
 ```bash
-cd backend && credentials.bat   # Windows；Mac/Linux 用 credentials.sh.example
+cd backend && copy credentials.env.example credentials.env   # 之後直接編輯 credentials.env
 ```
 
-六個環境變數：
+六個變數：
 
 | 任務 | API Key | Agent ID |
 | --- | --- | --- |
@@ -91,6 +93,8 @@ cd backend && credentials.bat   # Windows；Mac/Linux 用 credentials.sh.example
 - 某任務金鑰/agent id 缺 → 該任務退回 `StubLLM`（規則判讀，可離線 demo）
 - API 連不上 / 逾時 → `LLMUnavailable` 例外 → 文件標「**無法審核**」+ Capability 紅線記錄
 - `/api/health` 的 `llm_tasks` 欄位可查每個任務是否已設定憑證
+- 若 host 本機已用環境變數（`set` / `export`）設定同名變數，那組優先，`credentials.env` 內容會被忽略（不衝突）
+- 也保留 `credentials.bat.example` / `credentials.sh.example`，給偏好用 host 環境變數而非檔案的部署流程用
 
 ProphetAI 端點預設：`https://10.10.23.120:4231/public/kits/openai/v1/chat/completions`（可用 `APP_LLM_ENDPOINT` 覆寫）。
 

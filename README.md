@@ -75,25 +75,21 @@ OpenAI 相容端點、`model` 欄位放 **agent id**、`content` 用 **block 陣
 **關 SSL 驗證**(內網自簽憑證)、**不走對外 proxy**。實作在 `backend/app/services/llm.py` 的 `ProphetAILLM`。
 
 **啟用方式**:三個任務 = 三個獨立的 ProphetAI Agent,各自有自己的金鑰與 agent id(不共用)。
-金鑰與 agent id **只在 host 本機**用環境變數帶入(**勿 commit**,填了等於把祕密推上 GitHub):
+金鑰與 agent id **只在 host 本機**設定(**勿 commit**,填了等於把祕密推上 GitHub)。
+
+**推薦做法(只需填一次,之後每次啟動都自動生效)**:複製 `backend/credentials.env.example`
+→ `backend/credentials.env`,填好三組憑證存檔即可 — 不需要 `set`、不需要每次啟動前多跑一個指令,
+後端啟動時(`uvicorn` / 雙擊 `start-lan.bat`)會自動讀取這個檔案:
 
 ```bash
-# Windows:複製 backend/credentials.bat.example → backend/credentials.bat,
-# 填好三組憑證後,啟動後端前先執行它:
 cd backend
-credentials.bat
+copy credentials.env.example credentials.env   REM Windows(Mac/Linux 用 cp)
+# 用文字編輯器打開 credentials.env 填入三組金鑰/agent id,存檔即可
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-```bash
-# Mac/Linux:複製 backend/credentials.sh.example → backend/credentials.sh
-cd backend
-source credentials.sh
-uvicorn app.main:app --host 0.0.0.0 --port 8010
-```
-
-`credentials.bat` / `credentials.sh` 本身已被 `.gitignore` 排除,只有內容留空的 `.example` 範本會進版控。
-六個環境變數(可只填其中幾組,其餘任務會退回 `StubLLM`):
+`credentials.env` 本身已被 `.gitignore` 排除,只有內容留空的 `.example` 範本會進版控。
+六個變數(可只填其中幾組,其餘任務會退回 `StubLLM`):
 
 | 任務 | API Key 變數 | Agent ID 變數 |
 | --- | --- | --- |
@@ -102,6 +98,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8010
 | 申訴合理性(closed-loop) | `COMPANY_APPEAL_KEY` | `COMPANY_APPEAL_AGENT` |
 
 > 舊版單一 Agent 設定(`COMPANY_LLM_API_KEY` / `COMPANY_LLM_AGENT`)仍相容 — 沒填上面六個變數時,三個任務都會退回用這組舊變數。
+
+> 如果偏好用 host 環境變數而非檔案(例如已有既定的部署流程),`backend/credentials.bat.example` /
+> `credentials.sh.example` 仍保留 — 複製後填值,啟動前執行 `credentials.bat`(Windows)或
+> `source credentials.sh`(Mac/Linux)。若 host 環境變數已經設定,會優先於 `credentials.env` 檔案內容。
 
 - 某任務的金鑰/agent id **沒設** → 該任務自動退回 `StubLLM`(規則判讀,免 GPU,可離線 demo)。
 - API **連不上 / 403 / 回傳格式不符** → 文件標示為「**無法審核**」並記一筆 Capability 紅線,
