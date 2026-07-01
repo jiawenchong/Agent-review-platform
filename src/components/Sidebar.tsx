@@ -4,7 +4,7 @@ import { useNotifications } from '../context/NotificationContext';
 import { getCurrentUserId, listUsers, setCurrentUserId, type ApiUser } from '../api/client';
 
 const NAV_ITEMS = [
-  { num: '01', label: '上傳資料', to: '/upload' },
+  { num: '01', label: '規劃書評估', to: '/upload' },
   { num: '02', label: '專案儀表板', to: '/' },
   { num: '04', label: '通知中心', to: '/notifications', showBadge: true },
   { num: '05', label: '治理月報', to: '/report' },

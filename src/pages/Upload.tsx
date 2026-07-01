@@ -60,7 +60,7 @@ export function Upload() {
 
   return (
     <>
-      <PageHeader eyebrow="Governance Platform · 01" title="上傳資料" />
+      <PageHeader eyebrow="Governance Platform · 01" title="規劃書評估" />
       <div className="page-body">
         <div
           className="upload-dropzone"
@@ -105,6 +105,31 @@ export function Upload() {
               </div>
             </>
           )}
+        </div>
+
+        <div
+          className="card"
+          style={{
+            marginTop: 16, padding: '14px 18px', display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, color: 'var(--text-heading)', marginBottom: 2 }}>
+              沒有規劃書?先下載範本給提案人填寫
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-dim)' }}>
+              PPT 範本已含必要章節(目標 / 範圍 / 時程 / 風險 / 資源 / 里程碑),填完上傳即可評估。
+            </div>
+          </div>
+          <a
+            className="chip"
+            href="/agent-blueprint-template.pptx"
+            download="AI_Agent_規劃書範本.pptx"
+            style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}
+          >
+            ⬇ 下載規劃書範本(PPT)
+          </a>
         </div>
 
         {error && (
