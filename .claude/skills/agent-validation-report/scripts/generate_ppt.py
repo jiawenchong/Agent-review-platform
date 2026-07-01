@@ -1,340 +1,332 @@
-"""產生「AI Agent 驗證報告」PPTX — 深色科技風格,10 頁固定結構。
-
-用法:
-    python generate_ppt.py [input_data.json] [output.pptx]
-
-    input_data.json  — 選填,內容欄位對照 reference/input_data.example.json;
-                        省略則產出全部留白佔位符(方括號提示文字)的空白模板。
-    output.pptx       — 選填,預設 AI_Agent_Validation_Report.pptx(存在目前工作目錄)。
-
-頁面結構、配色與字體規則的權威定義在 ../reference/template_structure.json
-(single source of truth) — 本腳本在啟動時讀取它,不要把版面規則寫死兩份。
+#!/usr/bin/env python3
 """
-from __future__ import annotations
+generate_ppt.py  —  AI Agent Validation Report (template-fill approach)
 
-import json
+Usage:
+  python generate_ppt.py [input.json] [output.pptx]
+
+Loads reference/template.pptx and replaces text content slide-by-slide
+using key-value data from input.json.  All images, colours, fonts, and
+layout shapes are preserved from the template exactly as-is.
+
+Slides filled:
+  1  Cover
+  2  Agent Goal Definition
+  3  Data Sources & Tools
+  4  Decision Logic & Flow  (fills the left table; right flow diagram untouched)
+  5  Guardrails & Red Lines
+  6  Golden Test Cases
+  7  Task Completion Capability
+  8  Offline Validation
+  9  Online Validation
+"""
+
 import sys
+import json
 from pathlib import Path
 
-from pptx import Presentation
-from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
-from pptx.util import Inches, Pt
+try:
+    from pptx import Presentation
+except ImportError:
+    sys.exit("python-pptx not installed.  Run: pip install python-pptx")
 
-_SKILL_ROOT = Path(__file__).resolve().parents[1]
-_TEMPLATE_STRUCTURE_PATH = _SKILL_ROOT / "reference" / "template_structure.json"
-
-with open(_TEMPLATE_STRUCTURE_PATH, "r", encoding="utf-8") as f:
-    TEMPLATE_CONFIG = json.load(f)
-
-_META = TEMPLATE_CONFIG["template_metadata"]
-_ACCENT = _META["accent_colors"]
+SCRIPT_DIR = Path(__file__).parent
+TEMPLATE = SCRIPT_DIR.parent / "reference" / "template.pptx"
 
 
-def _rgb(hex_str: str) -> RGBColor:
-    h = hex_str.lstrip("#")
-    return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+# ── data helpers ──────────────────────────────────────────────────────────────
+
+def load_data(path):
+    if path is None:
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
-COLORS = {
-    "bg": _rgb(_META["background_color"]),
-    "title": _rgb(_ACCENT["text_main"]),
-    "body": _rgb(_ACCENT["text_sub"]),
-    "accent": _rgb(_ACCENT["primary"]),
-    "secondary": _rgb(_ACCENT["secondary"]),
-    "warning": _rgb(_ACCENT["warning"]),
-}
-# Table cells default to a white fill in python-pptx regardless of the slide
-# background, which would make the light-gray/green theme text unreadable —
-# every table cell gets an explicit dark navy fill to match the deck.
-CELL_BG = RGBColor(0x14, 0x1B, 0x33)
-HEADER_CELL_BG = RGBColor(0x1A, 0x2E, 0x4A)
-
-TITLE_FONT = _META["fonts"]["title"]
-BODY_FONT = _META["fonts"]["body"]
+def v(data, *keys):
+    """Return value at nested keys, or '[待補]' if missing / empty string."""
+    val = data
+    for k in keys:
+        if not isinstance(val, dict):
+            return "[待補]"
+        val = val.get(k)
+    if val is None or val == "":
+        return "[待補]"
+    return str(val)
 
 
-def create_presentation() -> Presentation:
-    prs = Presentation()
-    prs.slide_width = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-    return prs
+# ── text-replacement helpers ──────────────────────────────────────────────────
+
+def _set_para(para, text):
+    """Overwrite a paragraph: first run gets new text, rest are cleared."""
+    runs = list(para.runs)
+    if runs:
+        runs[0].text = text
+        for r in runs[1:]:
+            r.text = ""
+    else:
+        para.add_run().text = text
 
 
-def add_slide(prs: Presentation):
-    """Blank slide with the dark theme background applied.
-
-    Note: python-pptx has no presentation-level `slide_background` — the
-    background must be set per slide via `slide.background`.
-    """
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank layout
-    fill = slide.background.fill
-    fill.solid()
-    fill.fore_color.rgb = COLORS["bg"]
-    return slide
-
-
-def add_textbox(slide, left, top, width, height, text, font_size=14, color=None,
-                 bold=False, alignment=PP_ALIGN.LEFT, font_name=None):
-    color = color or COLORS["body"]
-    box = slide.shapes.add_textbox(left, top, width, height)
-    tf = box.text_frame
-    tf.word_wrap = True
-    for i, line in enumerate(str(text).split("\n")):
-        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        p.text = line
-        p.font.size = Pt(font_size)
-        p.font.color.rgb = color
-        p.font.bold = bold
-        p.font.name = font_name or BODY_FONT
-        p.alignment = alignment
-    return box
+def fill_tf(shape, text):
+    """Replace all text in a text-frame with a single string.
+    First paragraph gets the text; extra paragraphs are blanked."""
+    if not shape.has_text_frame:
+        return
+    paras = list(shape.text_frame.paragraphs)
+    if not paras:
+        return
+    _set_para(paras[0], text)
+    for p in paras[1:]:
+        _set_para(p, "")
 
 
-def add_table(slide, left, top, width, height, data, col_widths=None):
-    """data: list of rows (list of cell text); first row is treated as header."""
-    rows, cols = len(data), len(data[0])
-    frame = slide.shapes.add_table(rows, cols, left, top, width, height)
-    table = frame.table
-
-    if col_widths:
-        for i, w in enumerate(col_widths):
-            table.columns[i].width = Inches(w)
-
-    for i, row_data in enumerate(data):
-        for j, cell_text in enumerate(row_data):
-            cell = table.cell(i, j)
-            cell.text = str(cell_text)
-            cell.fill.solid()
-            cell.fill.fore_color.rgb = HEADER_CELL_BG if i == 0 else CELL_BG
-            for para in cell.text_frame.paragraphs:
-                para.font.size = Pt(12)
-                para.font.name = BODY_FONT
-                para.font.bold = i == 0
-                para.font.color.rgb = COLORS["accent"] if i == 0 else COLORS["body"]
-    return frame
+def fill_tf_lines(shape, *lines):
+    """Map each positional arg to the corresponding paragraph in the text-frame."""
+    if not shape.has_text_frame:
+        return
+    paras = list(shape.text_frame.paragraphs)
+    for i, line in enumerate(lines):
+        if i < len(paras):
+            _set_para(paras[i], line)
+    for p in paras[len(lines):]:
+        _set_para(p, "")
 
 
-# ── per-page generators (order matches reference/template_structure.json) ──
+def fill_cell(table, row, col, text):
+    """Set text in a single table cell (first paragraph)."""
+    try:
+        cell = table.rows[row].cells[col]
+    except IndexError:
+        return
+    paras = list(cell.text_frame.paragraphs)
+    if paras:
+        _set_para(paras[0], text)
+        for p in paras[1:]:
+            _set_para(p, "")
+    else:
+        cell.text_frame.add_paragraph().add_run().text = text
 
 
-def generate_slide_cover(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(2), Inches(1), "[公司 Logo]", font_size=10)
-    add_textbox(slide, Inches(2), Inches(2.5), Inches(9), Inches(1.5), data.get("title", "[報告主題]"),
-                font_size=44, color=COLORS["title"], bold=True, alignment=PP_ALIGN.CENTER, font_name=TITLE_FONT)
-    add_textbox(slide, Inches(2), Inches(4.0), Inches(9), Inches(1), data.get("subtitle", "[專案名稱]"),
-                font_size=24, color=COLORS["accent"], alignment=PP_ALIGN.CENTER)
-    info = data.get("info", {})
-    info_text = (
-        f"報告人: {info.get('reporter', '[報告人姓名]')}\n"
-        f"單位: {info.get('department', '[單位名稱]')}\n"
-        f"日期: {info.get('date', '[報告日期]')}"
-    )
-    add_textbox(slide, Inches(0.5), Inches(5.5), Inches(4), Inches(1.5), info_text, font_size=14)
-    add_textbox(slide, Inches(0.5), Inches(7.0), Inches(12), Inches(0.5), "ASE Confidential / Security-C",
-                font_size=10, alignment=PP_ALIGN.CENTER)
+def find(slide, name):
+    for s in slide.shapes:
+        if s.name == name:
+            return s
+    return None
 
 
-def generate_slide_goal_definition(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "Agent 目標定義",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
+def tbl(slide, name):
+    s = find(slide, name)
+    return s.table if s and s.shape_type == 19 else None
 
-    left_table = [
-        ["欄位", "內容"],
-        ["專案說明", data.get("project_desc", "[專案說明]")],
-        ["Agent 角色", data.get("agent_role", "[Agent 角色]")],
-        ["核心使命", data.get("mission", "[核心使命]")],
-        ["觸發時機", data.get("trigger", "[觸發時機]")],
+
+# ── per-slide fillers ─────────────────────────────────────────────────────────
+
+def slide1(sl, d):
+    """Cover: title / subtitle / reporter / department / date"""
+    s = find(sl, "標題 2")
+    if s:
+        fill_tf(s, v(d, "title"))
+
+    s = find(sl, "文字方塊 5")
+    if s:
+        fill_tf(s, v(d, "subtitle"))
+
+    s = find(sl, "文字版面配置區 2")
+    if s:
+        fill_tf_lines(
+            s,
+            f"報告人: {v(d, 'info', 'reporter')}",
+            v(d, "info", "department"),
+            v(d, "info", "date"),
+        )
+
+
+def slide2(sl, d):
+    """Agent Goal Definition: project info table + metrics panel"""
+    t = tbl(sl, "表格 2")
+    if t:
+        fill_cell(t, 0, 1, v(d, "project_desc"))
+        fill_cell(t, 1, 1, v(d, "agent_role"))
+        fill_cell(t, 2, 1, "")          # second agent-role row — leave blank
+        fill_cell(t, 3, 1, v(d, "mission"))
+        fill_cell(t, 4, 1, v(d, "trigger"))
+        fill_cell(t, 5, 1, v(d, "success_threshold"))
+
+    s = find(sl, "文字方塊 87")
+    if s:
+        fill_tf(s, v(d, "success_threshold"))
+
+    s = find(sl, "文字方塊 10")
+    if s:
+        fill_tf(s, v(d, "project_metrics"))
+
+
+def slide3(sl, d):
+    """Data Sources & Tools: three info boxes + tools table"""
+    s = find(sl, "文字方塊 12")
+    if s:
+        fill_tf(s, v(d, "data_sources"))
+
+    s = find(sl, "文字方塊 17")
+    if s:
+        fill_tf(s, v(d, "model_usage"))
+
+    s = find(sl, "文字方塊 18")
+    if s:
+        fill_tf(s, v(d, "knowledge_base"))
+
+    t = tbl(sl, "表格 21")
+    if t:
+        # Row 0 = headers (Skills / Tools / Data / Source)
+        fill_cell(t, 1, 0, v(d, "skills"))
+        fill_cell(t, 1, 1, v(d, "tools"))
+        fill_cell(t, 1, 2, v(d, "data"))
+        fill_cell(t, 1, 3, v(d, "source"))
+        for r in range(2, min(len(t.rows), 7)):
+            for c in range(min(len(t.columns), 4)):
+                fill_cell(t, r, c, "")
+
+
+def slide4(sl, d):
+    """Decision Logic: left table (Tasks / Sub-Agent / Logic / Tools).
+    Right-side Decision Flow diagram shapes are static — left untouched."""
+    t = tbl(sl, "表格 137")
+    if not t:
+        return
+    fill_cell(t, 1, 0, v(d, "tasks"))
+    fill_cell(t, 1, 1, v(d, "sub_agent"))
+    fill_cell(t, 1, 2, v(d, "logic"))
+    fill_cell(t, 1, 3, v(d, "logic_tools"))
+    for r in range(2, min(len(t.rows), 5)):
+        for c in range(min(len(t.columns), 4)):
+            fill_cell(t, r, c, "")
+
+
+def slide5(sl, d):
+    """Guardrails & Red Lines table (No / Guardrails Lists / Description)"""
+    t = tbl(sl, "表格 102")
+    if not t:
+        return
+    guardrails = [
+        ("Output Guardrail",        v(d, "g1_output")),
+        ("Capability Guardrail",    v(d, "g2_capability")),
+        ("Grounding Guardrail",     v(d, "g3_grounding")),
+        ("Hallucination Guardrail", v(d, "g4_hallucination")),
+        ("Goal Guardrail",          v(d, "g5_goal")),
     ]
-    add_table(slide, Inches(0.5), Inches(1.5), Inches(5), Inches(3), left_table, col_widths=[2, 3])
-
-    add_textbox(slide, Inches(6), Inches(1.5), Inches(6), Inches(0.5), "Agent 指標",
-                font_size=20, color=COLORS["accent"], bold=True)
-    add_textbox(
-        slide, Inches(6), Inches(2.2), Inches(6), Inches(2),
-        f"成功門檻: {data.get('success_threshold', '[成功門檻]')}\n\n"
-        f"專案指標: {data.get('project_metrics', '[專案指標]')}",
-        font_size=14,
-    )
-    add_textbox(slide, Inches(0.5), Inches(5.5), Inches(12), Inches(1),
-                "流程: Trigger → Perception → Reasoning → Action → Feedback",
-                font_size=14, color=COLORS["secondary"], alignment=PP_ALIGN.CENTER)
+    for i, (name, desc) in enumerate(guardrails):
+        row = i + 1
+        fill_cell(t, row, 0, str(i + 1))
+        fill_cell(t, row, 1, name)
+        fill_cell(t, row, 2, desc)
+    # Template had a 6th guardrail row — clear it
+    if len(t.rows) > 6:
+        fill_cell(t, 6, 0, "")
+        fill_cell(t, 6, 1, "")
+        fill_cell(t, 6, 2, "")
 
 
-def generate_slide_data_sources(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "資料來源與工具授權",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
-
-    col_titles = ["資料來源 (Data)", "模型使用 (Model)", "知識庫內容 (Knowledge)"]
-    col_contents = [
-        data.get("data_sources", "[資料來源內容]"),
-        data.get("model_usage", "[模型使用內容]"),
-        data.get("knowledge_base", "[知識庫內容]"),
+def slide6(sl, d):
+    """Golden Test Cases table (Scenario / 問題狀況 / 專家標準決策 / 驗證檢查點)"""
+    t = tbl(sl, "表格 3")
+    if not t:
+        return
+    cases = [
+        (v(d, "t1_problem"), v(d, "t1_expert"), v(d, "t1_check")),
+        (v(d, "t2_problem"), v(d, "t2_expert"), v(d, "t2_check")),
+        (v(d, "t3_problem"), v(d, "t3_expert"), v(d, "t3_check")),
+        (v(d, "t4_problem"), v(d, "t4_expert"), v(d, "t4_check")),
     ]
-    for i, (title, content) in enumerate(zip(col_titles, col_contents)):
-        left = Inches(0.5 + i * 4.2)
-        add_textbox(slide, left, Inches(1.5), Inches(3.8), Inches(0.5), title,
-                    font_size=18, color=COLORS["accent"], bold=True)
-        add_textbox(slide, left, Inches(2.2), Inches(3.8), Inches(2.5), content, font_size=14)
-
-    table_data = [
-        ["Skills", "Tools", "Data", "Source"],
-        [data.get("skills", "[Skills]"), data.get("tools", "[Tools]"),
-         data.get("data", "[Data]"), data.get("source", "[Source]")],
-    ]
-    add_table(slide, Inches(0.5), Inches(5.0), Inches(12), Inches(2), table_data, col_widths=[3, 3, 3, 3])
+    for i, (prob, expert, check) in enumerate(cases):
+        r = i + 1
+        fill_cell(t, r, 0, f"情境 {r}")
+        fill_cell(t, r, 1, prob)
+        fill_cell(t, r, 2, expert)
+        fill_cell(t, r, 3, check)
 
 
-def generate_slide_decision_logic(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "決策思維與流程",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
+def slide7(sl, d):
+    """Task Completion: summary text + task-rate table + accuracy-rate table"""
+    task_rate = v(d, "task_rate")
+    acc_rate  = v(d, "accuracy_rate")
 
-    table_data = [
-        ["Tasks", "Sub-Agent", "思考邏輯", "Tools & Skills"],
-        [data.get("tasks", "[Tasks]"), data.get("sub_agent", "[Sub-Agent]"),
-         data.get("logic", "[思考邏輯]"), data.get("logic_tools", "[Tools & Skills]")],
-    ]
-    add_table(slide, Inches(0.5), Inches(1.5), Inches(6), Inches(3), table_data, col_widths=[1.5, 1.5, 1.5, 1.5])
+    s = find(sl, "文字方塊 2")
+    if s:
+        fill_tf_lines(
+            s,
+            f"任務成功率 {task_rate}，結果準確率 {acc_rate}",
+            "",
+        )
 
-    add_textbox(slide, Inches(7), Inches(1.5), Inches(5), Inches(0.5), "Decision Flow",
-                font_size=20, color=COLORS["accent"], bold=True)
-    add_textbox(
-        slide, Inches(7), Inches(2.2), Inches(5), Inches(2),
-        "[流程圖佔位符]\n1. 進度是否落後?\n2. 負責人是否有填寫 Recovery Plan?\n"
-        "3. GPT 判斷合理性\n4. Agenda Priority #1~#4",
-        font_size=14,
-    )
-    add_textbox(slide, Inches(0.5), Inches(5.5), Inches(6), Inches(0.5),
-                "註: 正式派發三十分鐘內,重填或補填", font_size=12, color=COLORS["warning"])
+    t = tbl(sl, "表格 5")
+    if t:
+        if len(t.rows) > 1:
+            fill_cell(t, 1, 3, task_rate)
+        if len(t.rows) > 2:
+            fill_cell(t, 2, 3, task_rate)
 
-
-def generate_slide_guardrails(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "產線防護與紅線設定",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
-
-    table_data = [
-        ["No", "Guardrails Lists", "Description"],
-        ["1", "Output", data.get("g1_output", "[Output 描述]")],
-        ["2", "Capability", data.get("g2_capability", "[Capability 描述]")],
-        ["3", "Grounding", data.get("g3_grounding", "[Grounding 描述]")],
-        ["4", "Hallucination", data.get("g4_hallucination", "[Hallucination 描述]")],
-        ["5", "Goal", data.get("g5_goal", "[Goal 描述]")],
-    ]
-    add_table(slide, Inches(0.5), Inches(1.5), Inches(12), Inches(5), table_data, col_widths=[1, 2, 9])
+    t = tbl(sl, "表格 7")
+    if t:
+        last_col = len(t.columns) - 1
+        if len(t.rows) > 1:
+            fill_cell(t, 1, last_col, acc_rate)
+        if len(t.rows) > 2:
+            fill_cell(t, 2, last_col, acc_rate)
 
 
-def generate_slide_golden_tests(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "黃金測試題庫",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
-
-    table_data = [
-        ["Scenario", "問題狀況", "專家標準決策", "Agent 內容驗證檢查點"],
-        ["進度落後無 Plan", data.get("t1_problem", "[問題狀況]"), data.get("t1_expert", "[專家決策]"), data.get("t1_check", "[檢查點]")],
-        ["理由不合理", data.get("t2_problem", "[問題狀況]"), data.get("t2_expert", "[專家決策]"), data.get("t2_check", "[檢查點]")],
-        ["數據矛盾", data.get("t3_problem", "[問題狀況]"), data.get("t3_expert", "[專家決策]"), data.get("t3_check", "[檢查點]")],
-        ["檔案損壞", data.get("t4_problem", "[問題狀況]"), data.get("t4_expert", "[專家決策]"), data.get("t4_check", "[檢查點]")],
-    ]
-    add_table(slide, Inches(0.5), Inches(1.5), Inches(12), Inches(5), table_data, col_widths=[2, 3, 3.5, 3.5])
+def slide8(sl, d):
+    """Offline Validation: summary text box"""
+    s = find(sl, "文字方塊 3")
+    if s:
+        fill_tf_lines(
+            s,
+            "AI Agent 驗證有效性天數大於 7 天。",
+            f"驗證期間 {v(d, 'period')}，共 {v(d, 'days')} 天，"
+            f"任務成功率 {v(d, 'task_rate')}，結果準確率 {v(d, 'accuracy_rate')}",
+            "",
+        )
 
 
-def generate_slide_task_capability(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "任務完成能力",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
-    add_textbox(slide, Inches(0.5), Inches(1.2), Inches(12), Inches(0.5),
-                "成功標準: 任務完成率 100%,結果準確率 100%", font_size=14)
-
-    add_table(slide, Inches(0.5), Inches(2.0), Inches(3), Inches(1),
-              [["指標", "數值"], ["任務成功率", data.get("task_rate", "[數據]")]], col_widths=[1.5, 1.5])
-    add_table(slide, Inches(0.5), Inches(3.2), Inches(3), Inches(1),
-              [["指標", "數值"], ["結果準確率", data.get("accuracy_rate", "[數據]")]], col_widths=[1.5, 1.5])
-
-    add_textbox(slide, Inches(4.5), Inches(2.0), Inches(8), Inches(0.5), "驗證截圖",
-                font_size=18, color=COLORS["accent"], bold=True)
-    add_textbox(
-        slide, Inches(4.5), Inches(2.7), Inches(8), Inches(3),
-        "[截圖 1: 工程條列]\n\n[截圖 2: 進度解析]\n\n[截圖 3: Agenda 優先順序]", font_size=12,
-    )
+def slide9(sl, d):
+    """Online Validation: summary text box"""
+    s = find(sl, "文字方塊 7")
+    if s:
+        fill_tf_lines(
+            s,
+            "AI Agent 驗證持續運行天數大於 14 天。",
+            f"Online 持續運行 {v(d, 'run_days')} 天。",
+            "",
+        )
 
 
-def generate_slide_offline_validation(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "Offline 驗證",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
-    add_textbox(slide, Inches(0.5), Inches(1.2), Inches(12), Inches(0.5),
-                f"驗證天數: {data.get('days', '[天數]')} 天 | 期間: {data.get('period', '[期間]')}", font_size=14)
+# ── main ──────────────────────────────────────────────────────────────────────
 
-    add_textbox(slide, Inches(0.5), Inches(2.0), Inches(5), Inches(0.5), "郵件清單",
-                font_size=18, color=COLORS["accent"], bold=True)
-    add_textbox(slide, Inches(0.5), Inches(2.7), Inches(5), Inches(3), "[郵件清單截圖佔位符]", font_size=12)
-
-    add_textbox(slide, Inches(7), Inches(2.0), Inches(5), Inches(0.5), "每日產出正確日會 agenda",
-                font_size=18, color=COLORS["accent"], bold=True)
-    add_textbox(slide, Inches(7), Inches(2.7), Inches(5), Inches(3), "[截圖佔位符]\n\n成功率: 100%", font_size=12)
+FILLERS = [slide1, slide2, slide3, slide4, slide5, slide6, slide7, slide8, slide9]
 
 
-def generate_slide_online_validation(prs, data):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(0.5), Inches(0.5), Inches(12), Inches(1), "Online 驗證",
-                font_size=32, color=COLORS["title"], bold=True, font_name=TITLE_FONT)
-    add_textbox(slide, Inches(0.5), Inches(1.2), Inches(12), Inches(0.5),
-                f"持續運行: {data.get('run_days', '[天數]')} 天 | 每日準時完成", font_size=14)
+def main():
+    json_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    out_arg  = sys.argv[2] if len(sys.argv) > 2 else "AI_Agent_Validation_Report.pptx"
 
-    add_textbox(slide, Inches(0.5), Inches(2.0), Inches(5), Inches(0.5), "郵件清單",
-                font_size=18, color=COLORS["accent"], bold=True)
-    add_textbox(slide, Inches(0.5), Inches(2.7), Inches(5), Inches(3), "[郵件清單截圖佔位符]", font_size=12)
+    if not TEMPLATE.exists():
+        sys.exit(
+            f"Template not found: {TEMPLATE}\n"
+            "Place the template PPTX at reference/template.pptx first."
+        )
 
-    add_textbox(slide, Inches(7), Inches(2.0), Inches(5), Inches(0.5), "效能對比",
-                font_size=18, color=COLORS["accent"], bold=True)
-    add_textbox(
-        slide, Inches(7), Inches(2.7), Inches(5), Inches(3),
-        "[長條圖 1: 產出成功率 100%]\n\n[長條圖 2: 人工 30min vs Agent 3min]", font_size=12,
-    )
+    d   = load_data(json_arg)
+    prs = Presentation(str(TEMPLATE))
 
+    for i, (slide, filler) in enumerate(zip(prs.slides, FILLERS)):
+        try:
+            filler(slide, d)
+            print(f"  slide {i + 1} ✓")
+        except Exception as e:
+            print(f"  slide {i + 1} warning: {e}")
 
-def generate_slide_closing(prs):
-    slide = add_slide(prs)
-    add_textbox(slide, Inches(2), Inches(3), Inches(9), Inches(1), "Q&A",
-                font_size=48, color=COLORS["title"], bold=True, alignment=PP_ALIGN.CENTER, font_name=TITLE_FONT)
-    add_textbox(slide, Inches(2), Inches(4.5), Inches(9), Inches(0.5), "Thank You",
-                font_size=24, color=COLORS["accent"], alignment=PP_ALIGN.CENTER)
-
-
-def build(input_data: dict) -> Presentation:
-    prs = create_presentation()
-    generate_slide_cover(prs, input_data)
-    generate_slide_goal_definition(prs, input_data)
-    generate_slide_data_sources(prs, input_data)
-    generate_slide_decision_logic(prs, input_data)
-    generate_slide_guardrails(prs, input_data)
-    generate_slide_golden_tests(prs, input_data)
-    generate_slide_task_capability(prs, input_data)
-    generate_slide_offline_validation(prs, input_data)
-    generate_slide_online_validation(prs, input_data)
-    generate_slide_closing(prs)
-    return prs
-
-
-def main() -> None:
-    input_path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-    output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("AI_Agent_Validation_Report.pptx")
-
-    input_data = {}
-    if input_path and input_path.exists():
-        with open(input_path, "r", encoding="utf-8") as f:
-            input_data = json.load(f)
-    elif input_path:
-        print(f"⚠ 找不到 {input_path},將產出全部留白佔位符的空白模板。")
-
-    prs = build(input_data)
-    prs.save(output_path)
-    print(f"已產出:{output_path}")
+    prs.save(out_arg)
+    print(f"\nSaved → {out_arg}")
 
 
 if __name__ == "__main__":
