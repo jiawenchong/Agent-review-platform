@@ -207,7 +207,7 @@ export function ValidationReport() {
     setError(null);
     setIsCompiling(true);
     try {
-      const { data } = await compileForm(sessionId);
+      const { data, llm_available, has_source } = await compileForm(sessionId);
       const filled = flattenToForm(data);
       // Merge: keep anything the user already typed, fill blanks from AI.
       setForm((prev) => {
@@ -218,11 +218,20 @@ export function ValidationReport() {
         return merged;
       });
       const filledCount = Object.values(filled).filter((v) => v.trim()).length;
-      setNotice(
-        filledCount > 0
-          ? `AI 已從對話／文件中擷取 ${filledCount} 個欄位並填入（僅填空白欄位，不覆蓋你已填的）。請檢查後再生成。`
-          : 'AI 沒有從目前的對話／文件中擷取到可填入的欄位，請先上傳文件或進行訪談。',
-      );
+      if (filledCount > 0) {
+        setNotice(
+          `AI 已從對話／文件中擷取 ${filledCount} 個欄位並填入（僅填空白欄位，不覆蓋你已填的）。請檢查後再生成。`,
+        );
+      } else if (!has_source) {
+        setNotice('目前沒有可解讀的來源 — 請先到「訪談 & 上傳文件」上傳文件或進行對話，再回來按此按鈕。');
+      } else if (!llm_available) {
+        setError(
+          'AI 解讀服務未設定（COMPANY_VALIDATION_KEY / COMPANY_VALIDATION_AGENT 未填），' +
+            '無法自動擷取欄位。你仍可手動填寫表單後直接生成報告。',
+        );
+      } else {
+        setNotice('AI 這次沒能從內容中擷取到可填入的欄位，請補充更多細節或手動填寫。');
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'AI 解讀失敗，請稍後再試。');
     } finally {

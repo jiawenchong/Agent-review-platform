@@ -51,6 +51,8 @@ export interface UploadResponse {
 
 export interface CompileResponse {
   data: ReportForm;
+  llm_available: boolean;
+  has_source: boolean;
 }
 
 /** Create a new interview session. Returns the session_id. */

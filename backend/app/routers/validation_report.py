@@ -145,7 +145,12 @@ def compile_form(body: CompileRequest) -> dict:
     """
     session = _get_session(body.session_id)
     data = svc.compile_json(session["messages"], documents=session.get("documents"))
-    return {"data": data}
+    has_source = bool(session["messages"]) or bool(session.get("documents"))
+    return {
+        "data": data,
+        "llm_available": svc.validation_llm_available(),
+        "has_source": has_source,
+    }
 
 
 @router.post("/generate")

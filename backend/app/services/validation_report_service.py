@@ -25,8 +25,10 @@ _SKILL_DIR = _REPO_ROOT / ".claude" / "skills" / "agent-validation-report"
 _GENERATE_PPT_SCRIPT = _SKILL_DIR / "scripts" / "generate_ppt.py"
 _COMPILE_PROMPT_FILE = _SKILL_DIR / "reference" / "prompt.md"
 
-# Temporary output directory for generated files (per-session subdirectory)
-_TMP_BASE = Path("/tmp/validation_reports")
+# Temporary output directory for generated files (per-session subdirectory).
+# Use the OS temp dir so this works on Windows too — a hardcoded "/tmp" resolves
+# to "\tmp" at the drive root on Windows and fails with a permission error.
+_TMP_BASE = Path(tempfile.gettempdir()) / "validation_reports"
 
 
 def _ensure_tmp_dir(session_id: str) -> Path:
@@ -53,6 +55,16 @@ def _load_compile_prompt() -> tuple[str, str]:
         user_split[0].strip(),
         user_split[1].strip(),
     )
+
+
+def validation_llm_available() -> bool:
+    """True if the validation-report ProphetAI agent has credentials configured.
+
+    When False, the interview + compile steps run in a degraded/stub mode and
+    can't extract structured fields — the UI uses this to show an accurate
+    reason ("LLM not configured") instead of "found nothing".
+    """
+    return _task_credentials_present("validation")
 
 
 def _documents_block(documents: list[dict] | None) -> str:
