@@ -55,14 +55,39 @@ def _load_compile_prompt() -> tuple[str, str]:
     )
 
 
-def get_interview_response(messages: list[dict]) -> str:
+def _documents_block(documents: list[dict] | None) -> str:
+    """Render uploaded documents as a single reference block for the LLM.
+
+    documents: [{"filename": str, "text": str}, ...]
+    Returns "" when there are no documents.
+    """
+    if not documents:
+        return ""
+    parts = ["=== 使用者上傳的參考文件 ==="]
+    for d in documents:
+        parts.append(f"【文件:{d.get('filename', '未命名')}】\n{d.get('text', '')}")
+    return "\n\n".join(parts)
+
+
+def get_interview_response(messages: list[dict], documents: list[dict] | None = None) -> str:
     """Call the interview LLM with full conversation history.
 
     messages: [{"role": "user"|"assistant", "content": str}, ...]
+    documents: optional uploaded files whose extracted text is folded into the
+    system prompt so the assistant can read and analyse them (kept out of the
+    visible chat history so the UI stays clean).
 
     Returns the assistant's text response, or a fallback string if LLM unavailable.
     """
     system = prompts.validation_interview_system_prompt()
+
+    docs = _documents_block(documents)
+    if docs:
+        system = (
+            f"{system}\n\n{docs}\n\n"
+            "(請根據以上使用者上傳的文件內容,主動幫他整理驗證報告所需的資訊,"
+            "並針對文件中缺漏或不清楚的部分提問。)"
+        )
 
     try:
         prophet = ProphetAILLM()
@@ -103,15 +128,18 @@ def _strip_json_fences(text: str) -> str:
     return text
 
 
-def compile_json(messages: list[dict]) -> dict:
-    """Compile the conversation into structured JSON for the PPTX template.
+def compile_json(messages: list[dict], documents: list[dict] | None = None) -> dict:
+    """Compile the conversation (+ uploaded documents) into structured JSON.
 
     Loads the compilation prompt from .claude/skills/agent-validation-report/reference/prompt.md,
-    feeds the conversation as {source_material}, calls ProphetAI, parses JSON.
+    feeds the source material as {source_material}, calls ProphetAI, parses JSON.
 
     Falls back to empty dict if LLM is unavailable (PPTX will show [待補] everywhere).
     """
     source_material = _format_conversation_as_source_material(messages)
+    docs = _documents_block(documents)
+    if docs:
+        source_material = f"{docs}\n\n{source_material}"
 
     # Load the compile prompt
     system_text, user_template = _load_compile_prompt()

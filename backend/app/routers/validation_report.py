@@ -17,16 +17,18 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from ..services import extraction
 from ..services import validation_report_service as svc
 
 router = APIRouter(prefix="/api/validation-report", tags=["validation-report"])
 
 # ── in-memory session store ──────────────────────────────────────────────────
-# { session_id: { "messages": [...], "pptx_path": Path|None, "pdf_path": Path|None } }
+# { session_id: { "messages": [...], "documents": [...],
+#                 "pptx_path": Path|None, "pdf_path": Path|None } }
 _sessions: dict[str, dict] = {}
 
 
@@ -37,8 +39,16 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class CompileRequest(BaseModel):
+    session_id: str
+
+
 class GenerateRequest(BaseModel):
     session_id: str
+    # When provided, this structured form is used directly as the report data
+    # (deterministic — the user filled the form themselves). When omitted, the
+    # conversation + uploaded documents are compiled via the LLM instead.
+    form: dict | None = None
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -58,6 +68,7 @@ def create_session() -> dict:
     session_id = str(uuid.uuid4())
     _sessions[session_id] = {
         "messages": [],
+        "documents": [],
         "pptx_path": None,
         "pdf_path": None,
     }
@@ -78,12 +89,63 @@ def chat(body: ChatRequest) -> dict:
     messages.append({"role": "user", "content": body.message})
 
     # Get LLM response (never raises — falls back to stub message on error)
-    response = svc.get_interview_response(messages)
+    response = svc.get_interview_response(messages, documents=session.get("documents"))
 
     # Append assistant response
     messages.append({"role": "assistant", "content": response})
 
     return {"response": response, "messages": messages}
+
+
+@router.post("/upload")
+async def upload_document(
+    session_id: str = Form(...),
+    file: UploadFile = File(...),
+) -> dict:
+    """Upload a source document (DOCX/PPTX/TXT/MD). Its text is extracted and
+    kept as reference material for both the interview and the compile step, and
+    the assistant is asked to read + analyse it right away.
+    """
+    session = _get_session(session_id)
+    raw = await file.read()
+
+    try:
+        kind, text = extraction.extract_text(file.filename or "uploaded", raw)
+    except extraction.ExtractionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    documents: list[dict] = session.setdefault("documents", [])
+    documents.append({"filename": file.filename or "uploaded", "kind": kind, "text": text})
+
+    # Add a short marker to the visible chat (the full text lives in
+    # session["documents"] and is folded into the LLM context, so the chat
+    # transcript stays readable) and get the assistant to analyse it.
+    messages: list[dict] = session["messages"]
+    messages.append({
+        "role": "user",
+        "content": f"（已上傳文件:{file.filename}，共 {len(text)} 字，請幫我解讀內容）",
+    })
+    response = svc.get_interview_response(messages, documents=documents)
+    messages.append({"role": "assistant", "content": response})
+
+    return {
+        "filename": file.filename,
+        "kind": kind,
+        "char_count": len(text),
+        "messages": messages,
+        "document_count": len(documents),
+    }
+
+
+@router.post("/compile")
+def compile_form(body: CompileRequest) -> dict:
+    """Analyse the conversation + uploaded documents and return structured JSON
+    to pre-fill the report form. Empty fields come back as "" (the user fills
+    or corrects them before generating).
+    """
+    session = _get_session(body.session_id)
+    data = svc.compile_json(session["messages"], documents=session.get("documents"))
+    return {"data": data}
 
 
 @router.post("/generate")
@@ -94,13 +156,19 @@ def generate(body: GenerateRequest) -> dict:
     Returns {"ready": true} on success.
     """
     session = _get_session(body.session_id)
-    messages: list[dict] = session["messages"]
 
-    if not messages:
-        raise HTTPException(status_code=400, detail="No conversation to compile — start chatting first.")
-
-    # Step 1: compile conversation to structured JSON
-    data = svc.compile_json(messages)
+    # Prefer the explicit form (deterministic); otherwise compile from the
+    # conversation + uploaded documents via the LLM.
+    if body.form is not None:
+        data = body.form
+    else:
+        messages: list[dict] = session["messages"]
+        if not messages:
+            raise HTTPException(
+                status_code=400,
+                detail="沒有可用的資料 — 請先填寫報告表單,或進行訪談/上傳文件。",
+            )
+        data = svc.compile_json(messages, documents=session.get("documents"))
 
     # Step 2: generate PPTX
     try:

@@ -524,3 +524,136 @@ if __name__ == "__main__":
 10. 前端：所有 fetch 加 `{ credentials: "include" }`
 11. 前端：依 `user.role` 顯示/隱藏功能（見 2-5）
 12. 前端：ActivityPage 元件 + API bridge（見 3-3、3-4）
+
+---
+
+## Part 5 — FastAPI + JWT Cookie 移植版（實戰踩雷紀錄）
+
+上面 Part 1–4 是 Flask + session 版本。若後端是 **FastAPI**（無 server-side session），
+改用 **httpOnly JWT cookie**。以下是把這套 AD 登入接進 FastAPI 專案時實際踩到、
+且會讓「明明設定都對卻登不進去」的五個雷 —— 依序排查即可。
+
+### 5-1 ⚠️ 最容易中的雷：JWT 不要用 PyJWT，改用標準庫
+
+**症狀**：登入到最後一步噴 500，traceback 顯示
+`AttributeError: module 'jwt' has no attribute 'encode'`。
+
+**原因**：PyPI 上有兩個都 `import jwt` 的套件 —— `PyJWT`（有 `encode`/`decode`）和
+另一個叫 `jwt` 的無關套件（沒有）。主機上裝到錯的、或兩個都裝互相蓋掉，`jwt.encode` 就消失。
+在鎖定的公司電腦上很難清乾淨。
+
+**解法**：HS256 JWT 本質就是「對兩段 base64url 做一個 HMAC」，直接用標準庫自幹 ~30 行，
+徹底移除 PyJWT 依賴，不再有撞名問題：
+
+```python
+import base64, hashlib, hmac, json
+from datetime import datetime, timedelta, timezone
+
+class TokenError(Exception): ...
+class TokenExpired(TokenError): ...
+
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+def _unb64url(seg: str) -> bytes:
+    return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+def _sign(signing_input: bytes, secret: str) -> str:
+    return _b64url(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest())
+
+def create_token(sub: str, role: str, name: str, secret: str, expire_hours=8) -> str:
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    exp = int((datetime.now(timezone.utc) + timedelta(hours=expire_hours)).timestamp())
+    payload = _b64url(json.dumps({"sub": sub, "role": role, "name": name, "exp": exp},
+                                 separators=(",", ":")).encode())
+    sig = _sign(f"{header}.{payload}".encode(), secret)
+    return f"{header}.{payload}.{sig}"
+
+def decode_token(token: str, secret: str) -> dict:
+    try:
+        header, payload, sig = token.split(".")
+    except (ValueError, AttributeError):
+        raise TokenError("malformed")
+    if not hmac.compare_digest(_sign(f"{header}.{payload}".encode(), secret), sig):
+        raise TokenError("bad signature")           # ← 一定要 constant-time 比對
+    claims = json.loads(_unb64url(payload))
+    if claims.get("exp") and int(datetime.now(timezone.utc).timestamp()) >= int(claims["exp"]):
+        raise TokenExpired("expired")
+    return claims
+```
+
+要點：簽章驗證**務必用 `hmac.compare_digest`**（避免時序側信道）；`exp` 自己檢查。
+
+### 5-2 SIMPLE bind 要「多個 UPN 後綴依序嘗試」
+
+從 AD 的角度，**UPN 後綴填錯**跟**密碼錯**回的是同一個錯誤碼（`52e`），
+所以「猜一個後綴、錯了就報密碼錯誤」會讓使用者以為密碼有問題。base DN
+（如 `DC=ase,DC=com,DC=tw`）常常跟真正的 UPN 後綴（如 `kh.asegroup.com`）對不上。
+**解法：準備一組候選後綴依序 bind，任何一個成功就算過**（見 Part 1-1 的 `ad_authenticate`
+本來就是這個設計）。FastAPI 版把後綴做成逗號分隔的設定值 `kh.asegroup.com,aseglobal.com`，
+再自動追加一個由 base DN 推導的 FQDN 當最後候選。並加 `connect_timeout=5`，AD 連不上時
+快速 fallback，不要卡在 OS socket timeout。
+
+### 5-3 credentials.env 不會被 pydantic-settings 自動載入
+
+若把 AD 設定放在 `credentials.env`，`pydantic-settings` 預設只讀字面上叫 `.env` 的檔，
+**不會**讀 `credentials.env` → `settings.ad_server` 永遠是空字串 → 整段 AD 分支被跳過 →
+直接 fallback 本機密碼 → 一律登入失敗。解法：在 `config.py` 建立 `Settings()` **之前**
+先 `load_dotenv(BACKEND_DIR / "credentials.env", override=False)`。
+
+### 5-4 自動建立使用者要防主鍵衝突
+
+第一次 AD 登入成功後自動建 user row 時，若 DB 已有一筆 `user_id == empno` 但
+`empno` 欄位是 NULL 的舊列（種子資料、或加 AD 欄位前建的），用 `WHERE empno = ?` 查會
+漏掉它 → 直接 INSERT 同 PK → `IntegrityError` → 500。**解法：INSERT 前先用主鍵再查一次
+（`db.get(User, empno)`）；找到就就地補欄位（backfill empno、升級 admin），只有真的不存在才 INSERT。**
+
+### 5-5 第一個 admin 的雞生蛋問題 + 零設定
+
+要有 admin 才能在後台指派別人角色，但一開始沒有 admin。解法：設定檔放一個
+`BOOTSTRAP_ADMIN_EMPNO`（**只放工號，不放密碼** —— 密碼永遠是本人的 AD 密碼），
+該工號第一次登入成功時自動升為 admin，且每次登入都自我修復（idempotent）。
+其餘設定（AD server / UPN 後綴 / JWT secret）全部給合理預設或自動產生
+（JWT secret 首次啟動用 `secrets.token_hex(32)` 產生後存到 gitignore 的 `.jwt_secret`），
+讓 `credentials.env` 理想上只剩「真正的機密」要填。
+
+### 5-6 FastAPI 版關鍵片段
+
+```python
+# deps.py — 從 httpOnly cookie 取 JWT（取代 Flask session）
+def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(401, "未登入")
+    try:
+        payload = decode_token(token, SECRET)
+    except TokenExpired:
+        raise HTTPException(401, "登入已過期")
+    except Exception:
+        raise HTTPException(401, "Token 無效")
+    user = db.get(User, payload["sub"])
+    if not user:
+        raise HTTPException(401, "使用者不存在")
+    return user
+
+# 登入成功後種 cookie（httpOnly + SameSite=Lax，JS 讀不到、CSRF 安全）
+response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax",
+                    secure=IS_HTTPS, max_age=EXPIRE_HOURS * 3600, path="/")
+
+# CORS：跨來源要帶 cookie 必須 allow_credentials=True（且 origins 不能用 "*"）
+app.add_middleware(CORSMiddleware, allow_origins=[...],
+                   allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+```
+
+前端所有 fetch 一樣要加 `credentials: "include"`，cookie 才會被帶上。
+
+### 5-7 FastAPI 移植檢查表
+
+1. `pip install ldap3 bcrypt`（**不要**裝 PyJWT，JWT 用標準庫自幹 —— 見 5-1）
+2. `config.py`：建 `Settings()` 前先 `load_dotenv(credentials.env)`（見 5-3）
+3. AD：多 UPN 後綴依序 bind + `connect_timeout`（見 5-2）
+4. `auth_service.py`：標準庫 HS256 `create_token` / `decode_token`（見 5-1）
+5. `deps.py`：`current_user()` 從 cookie 解 JWT（見 5-6）
+6. 登入 route：AD 成功 → 自動建/補 user（防主鍵衝突，見 5-4）→ 種 httpOnly cookie
+7. bootstrap admin：只放工號、自動升級（見 5-5）
+8. CORS `allow_credentials=True`；前端 fetch 全加 `credentials: "include"`
