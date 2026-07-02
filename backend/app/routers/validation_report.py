@@ -41,6 +41,7 @@ class ChatRequest(BaseModel):
 
 class CompileRequest(BaseModel):
     session_id: str
+    note: str = ""
 
 
 class GenerateRequest(BaseModel):
@@ -144,8 +145,14 @@ def compile_form(body: CompileRequest) -> dict:
     or corrects them before generating).
     """
     session = _get_session(body.session_id)
-    data = svc.compile_json(session["messages"], documents=session.get("documents"))
-    has_source = bool(session["messages"]) or bool(session.get("documents"))
+    data = svc.compile_json(
+        session["messages"],
+        documents=session.get("documents"),
+        note=body.note,
+    )
+    has_source = (
+        bool(session["messages"]) or bool(session.get("documents")) or bool(body.note.strip())
+    )
     return {
         "data": data,
         "llm_available": svc.validation_llm_available(),

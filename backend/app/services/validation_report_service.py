@@ -12,7 +12,6 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 from pathlib import Path
 
 from . import prompts
@@ -25,10 +24,14 @@ _SKILL_DIR = _REPO_ROOT / ".claude" / "skills" / "agent-validation-report"
 _GENERATE_PPT_SCRIPT = _SKILL_DIR / "scripts" / "generate_ppt.py"
 _COMPILE_PROMPT_FILE = _SKILL_DIR / "reference" / "prompt.md"
 
-# Temporary output directory for generated files (per-session subdirectory).
-# Use the OS temp dir so this works on Windows too — a hardcoded "/tmp" resolves
-# to "\tmp" at the drive root on Windows and fails with a permission error.
-_TMP_BASE = Path(tempfile.gettempdir()) / "validation_reports"
+# Output directory for generated files (per-session subdirectory).
+# Written INSIDE the backend folder — where uvicorn already runs and reads
+# credentials.env / governance.db — so it's guaranteed writable on every OS.
+# A hardcoded "/tmp" resolved to "\tmp" at the drive root on Windows and failed
+# with "存取被拒 (WinError 5)"; even the OS temp dir can be locked down on
+# corporate machines, so we use a dir we know the app can write to.
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_TMP_BASE = _BACKEND_DIR / "generated_reports"
 
 
 def _ensure_tmp_dir(session_id: str) -> Path:
@@ -140,18 +143,25 @@ def _strip_json_fences(text: str) -> str:
     return text
 
 
-def compile_json(messages: list[dict], documents: list[dict] | None = None) -> dict:
-    """Compile the conversation (+ uploaded documents) into structured JSON.
+def compile_json(
+    messages: list[dict],
+    documents: list[dict] | None = None,
+    note: str = "",
+) -> dict:
+    """Compile uploaded documents + notes (+ any conversation) into structured JSON.
 
     Loads the compilation prompt from .claude/skills/agent-validation-report/reference/prompt.md,
     feeds the source material as {source_material}, calls ProphetAI, parses JSON.
 
-    Falls back to empty dict if LLM is unavailable (PPTX will show [待補] everywhere).
+    `note` is the user's free-text supplementary input from the form page (things
+    not in the uploaded file). Falls back to empty dict if LLM is unavailable.
     """
-    source_material = _format_conversation_as_source_material(messages)
+    source_material = _format_conversation_as_source_material(messages) if messages else ""
     docs = _documents_block(documents)
     if docs:
         source_material = f"{docs}\n\n{source_material}"
+    if note.strip():
+        source_material = f"=== 使用者補充說明 ===\n{note.strip()}\n\n{source_material}"
 
     # Load the compile prompt
     system_text, user_template = _load_compile_prompt()
@@ -183,11 +193,13 @@ def compile_json(messages: list[dict], documents: list[dict] | None = None) -> d
 
 
 def generate_pptx(data: dict, session_id: str) -> Path:
-    """Write data to temp JSON, call generate_ppt.py, return .pptx path.
+    """Write data to JSON, call generate_ppt.py, return .pptx path.
 
     The script is called as a subprocess:
-      python <script> <input.json> <output.pptx>
+      <this-python> <script> <input.json> <output.pptx>
     """
+    import sys
+
     out_dir = _ensure_tmp_dir(session_id)
     json_path = out_dir / "input.json"
     pptx_path = out_dir / "AI_Agent_Validation_Report.pptx"
@@ -195,9 +207,11 @@ def generate_pptx(data: dict, session_id: str) -> Path:
     # Write input JSON
     json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Run the generator script
+    # Run the generator script with the SAME interpreter running the backend
+    # (sys.executable), so it uses the venv that has python-pptx installed —
+    # a bare "python" may resolve to a different interpreter on Windows.
     result = subprocess.run(
-        ["python", str(_GENERATE_PPT_SCRIPT), str(json_path), str(pptx_path)],
+        [sys.executable, str(_GENERATE_PPT_SCRIPT), str(json_path), str(pptx_path)],
         capture_output=True,
         text=True,
         timeout=120,

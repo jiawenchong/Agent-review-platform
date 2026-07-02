@@ -87,11 +87,11 @@ export async function uploadDocument(
   });
 }
 
-/** Ask the AI to read the conversation + uploaded docs and pre-fill the form. */
-export async function compileForm(session_id: string): Promise<CompileResponse> {
+/** Ask the AI to read uploaded docs + supplementary note and pre-fill the form. */
+export async function compileForm(session_id: string, note = ''): Promise<CompileResponse> {
   return apiFetch<CompileResponse>('/api/validation-report/compile', {
     method: 'POST',
-    body: JSON.stringify({ session_id }),
+    body: JSON.stringify({ session_id, note }),
   });
 }
 

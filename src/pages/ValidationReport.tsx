@@ -6,7 +6,6 @@ import {
   downloadUrl,
   generateReport,
   previewUrl,
-  sendMessage,
   uploadDocument,
 } from '../api/validationReportClient';
 import {
@@ -17,46 +16,9 @@ import {
   type FormField,
 } from '../data/validationReportFields';
 
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 interface UploadedDoc {
   filename: string;
   char_count: number;
-}
-
-type Tab = 'interview' | 'form';
-
-// ── Typing Indicator ──────────────────────────────────────────────────────
-
-function TypingIndicator() {
-  return (
-    <div className="vr-message vr-message--assistant">
-      <div className="vr-avatar">AI</div>
-      <div className="vr-bubble vr-bubble--assistant vr-typing">
-        <span />
-        <span />
-        <span />
-      </div>
-    </div>
-  );
-}
-
-// ── Message Bubble ────────────────────────────────────────────────────────
-
-function MessageBubble({ msg }: { msg: Message }) {
-  const isUser = msg.role === 'user';
-  return (
-    <div className={`vr-message ${isUser ? 'vr-message--user' : 'vr-message--assistant'}`}>
-      {!isUser && <div className="vr-avatar">AI</div>}
-      <div className={`vr-bubble ${isUser ? 'vr-bubble--user' : 'vr-bubble--assistant'}`}>
-        {msg.content}
-      </div>
-      {isUser && <div className="vr-avatar vr-avatar--user">你</div>}
-    </div>
-  );
 }
 
 // ── Form field renderer ────────────────────────────────────────────────────
@@ -100,13 +62,10 @@ function FieldInput({
 
 export function ValidationReport() {
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('form');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
+  const [note, setNote] = useState('');
   const [form, setForm] = useState<Record<string, string>>(emptyForm());
 
-  const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -116,12 +75,9 @@ export function ValidationReport() {
   const [notice, setNotice] = useState<string | null>(null);
   const [pdfKey, setPdfKey] = useState(0);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Create a session on mount so the form + upload work without needing to
-  // start a chat first.
+  // Create a session on mount so upload / AI-fill / generate all work.
   useEffect(() => {
     let cancelled = false;
     createSession()
@@ -136,80 +92,32 @@ export function ValidationReport() {
     };
   }, []);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
-
-  const handleStartInterview = async () => {
-    if (!sessionId) return;
-    setError(null);
-    setIsLoading(true);
-    try {
-      const { messages: updated } = await sendMessage(sessionId, '開始');
-      setMessages(updated);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '啟動訪談失敗，請稍後再試。');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSend = async () => {
-    if (!sessionId || !input.trim() || isLoading) return;
-    const text = input.trim();
-    setInput('');
-    setError(null);
-    setIsLoading(true);
-    setMessages((prev) => [...prev, { role: 'user', content: text }]);
-    try {
-      const { messages: updated } = await sendMessage(sessionId, text);
-      setMessages(updated);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '傳送失敗，請稍後再試。');
-      setMessages((prev) => prev.slice(0, -1));
-    } finally {
-      setIsLoading(false);
-      inputRef.current?.focus();
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   const handleFilePick = () => fileInputRef.current?.click();
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ''; // allow re-selecting the same file
+    e.target.value = '';
     if (!file || !sessionId) return;
     setError(null);
     setIsUploading(true);
-    setIsLoading(true);
     try {
       const res = await uploadDocument(sessionId, file);
       setDocs((prev) => [...prev, { filename: res.filename, char_count: res.char_count }]);
-      setMessages(res.messages);
-      setNotice(`已上傳並解讀「${res.filename}」，可在下方對話查看分析，或到「報告表單」按「AI 解讀並填入」。`);
+      setNotice(`已上傳「${res.filename}」（${res.char_count} 字）。按下方「AI 解讀 → 自動填入表單」讓 AI 擷取內容。`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '文件上傳失敗，請確認格式為 DOCX/PPTX/TXT/MD。');
     } finally {
       setIsUploading(false);
-      setIsLoading(false);
     }
   };
 
-  const handleCompile = async () => {
+  const handleAnalyze = async () => {
     if (!sessionId || isCompiling) return;
     setError(null);
     setIsCompiling(true);
     try {
-      const { data, llm_available, has_source } = await compileForm(sessionId);
+      const { data, llm_available, has_source } = await compileForm(sessionId, note);
       const filled = flattenToForm(data);
-      // Merge: keep anything the user already typed, fill blanks from AI.
       setForm((prev) => {
         const merged = { ...prev };
         for (const [k, v] of Object.entries(filled)) {
@@ -220,17 +128,17 @@ export function ValidationReport() {
       const filledCount = Object.values(filled).filter((v) => v.trim()).length;
       if (filledCount > 0) {
         setNotice(
-          `AI 已從對話／文件中擷取 ${filledCount} 個欄位並填入（僅填空白欄位，不覆蓋你已填的）。請檢查後再生成。`,
+          `AI 已擷取 ${filledCount} 個欄位並填入下方表單（只填空白欄位，不覆蓋你已改的）。請檢查、補齊後生成。`,
         );
       } else if (!has_source) {
-        setNotice('目前沒有可解讀的來源 — 請先到「訪談 & 上傳文件」上傳文件或進行對話，再回來按此按鈕。');
+        setNotice('還沒有可解讀的內容 — 請先上傳文件，或在上方補充說明欄位輸入資訊，再按此按鈕。');
       } else if (!llm_available) {
         setError(
-          'AI 解讀服務未設定（COMPANY_VALIDATION_KEY / COMPANY_VALIDATION_AGENT 未填），' +
-            '無法自動擷取欄位。你仍可手動填寫表單後直接生成報告。',
+          'AI 解讀服務未設定（credentials.env 的 COMPANY_VALIDATION_KEY / COMPANY_VALIDATION_AGENT 未填）。' +
+            '你仍可手動填寫下方表單後直接生成報告。',
         );
       } else {
-        setNotice('AI 這次沒能從內容中擷取到可填入的欄位，請補充更多細節或手動填寫。');
+        setNotice('AI 這次沒能擷取到可對應的欄位，請在補充說明加上更多細節，或直接手動填寫下方表單。');
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'AI 解讀失敗，請稍後再試。');
@@ -269,17 +177,14 @@ export function ValidationReport() {
         /* ignore */
       }
     }
-    setMessages([]);
-    setInput('');
     setDocs([]);
+    setNote('');
     setForm(emptyForm());
     setGenerated(false);
     setHasPdf(false);
     setError(null);
     setNotice(null);
-    setIsLoading(false);
     setIsGenerating(false);
-    // fresh session
     try {
       const { session_id } = await createSession();
       setSessionId(session_id);
@@ -321,7 +226,7 @@ export function ValidationReport() {
             className="btn btn-primary"
             onClick={handleGenerate}
             disabled={isGenerating || !sessionId}
-            title="以「報告表單」內容生成 PPTX"
+            title="以下方表單內容生成 PPTX"
           >
             {isGenerating ? (
               <>
@@ -356,94 +261,20 @@ export function ValidationReport() {
         </div>
       )}
 
-      {/* ── Two-panel layout ── */}
+      {/* ── Two-panel layout: [source + form] | [preview] ── */}
       <div className="vr-body">
-        {/* Left: Tabs (form / interview) */}
+        {/* Left: unified source + form */}
         <div className="vr-chat-panel card">
-          <div className="vr-tabs">
-            <button
-              className={`vr-tab ${tab === 'form' ? 'vr-tab--active' : ''}`}
-              onClick={() => setTab('form')}
-            >
-              報告表單{filledCount > 0 ? ` (${filledCount})` : ''}
-            </button>
-            <button
-              className={`vr-tab ${tab === 'interview' ? 'vr-tab--active' : ''}`}
-              onClick={() => setTab('interview')}
-            >
-              訪談 &amp; 上傳文件{docs.length > 0 ? ` (${docs.length})` : ''}
-            </button>
-          </div>
-
-          {tab === 'form' ? (
-            <>
-              <div className="vr-form-toolbar">
-                <div className="vr-form-hint">
-                  填寫以下欄位後按右上角「生成報告」。空欄位在報告中會顯示 <code>[待補]</code>。
-                </div>
-                <button
-                  className="btn btn-secondary vr-compile-btn"
-                  onClick={handleCompile}
-                  disabled={isCompiling || !sessionId}
-                  title="讓 AI 讀取你上傳的文件 / 訪談內容，自動填入下方表單"
-                >
-                  {isCompiling ? (
-                    <>
-                      <span className="vr-spinner" /> 解讀中…
-                    </>
-                  ) : (
-                    '✨ AI 解讀並填入'
-                  )}
-                </button>
+          <div className="vr-form-scroll">
+            {/* Step 1 — source (upload + AI note) */}
+            <div className="vr-source-box">
+              <div className="vr-source-head">
+                <span className="vr-step-num">1</span>
+                <span className="vr-source-title">上傳報告／來源，讓 AI 幫你填</span>
               </div>
-
-              <div className="vr-form-scroll">
-                {FORM_GROUPS.map((group) => (
-                  <div className="vr-form-group" key={group.title}>
-                    <div className="vr-form-group-title">{group.title}</div>
-                    {group.note && <div className="vr-form-group-note">{group.note}</div>}
-                    <div className="vr-form-grid">
-                      {group.fields.map((f) => (
-                        <FieldInput
-                          key={f.key}
-                          field={f}
-                          value={form[f.key] ?? ''}
-                          onChange={(v) => handleFieldChange(f.key, v)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="vr-messages">
-                {messages.length === 0 && !isLoading && (
-                  <div className="vr-empty-state">
-                    <div className="vr-empty-icon">🎙️</div>
-                    <div className="vr-empty-title">上傳文件或開始訪談</div>
-                    <div className="vr-empty-desc">
-                      上傳規劃書 / 測試結果 / 會議記錄（DOCX、PPTX、TXT、MD），
-                      AI 會讀取內容並協助整理；也可以直接對話。完成後到「報告表單」
-                      按「AI 解讀並填入」自動帶入欄位。
-                    </div>
-                    <div className="vr-empty-actions">
-                      <button className="btn btn-secondary" onClick={handleFilePick} disabled={isUploading || !sessionId}>
-                        📎 上傳文件
-                      </button>
-                      <button className="btn btn-primary" onClick={handleStartInterview} disabled={isLoading || !sessionId}>
-                        開始訪談
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {messages.map((msg, i) => (
-                  <MessageBubble key={i} msg={msg} />
-                ))}
-                {isLoading && <TypingIndicator />}
-                <div ref={messagesEndRef} />
+              <div className="vr-source-hint">
+                上傳規劃書 / 測試結果 / 會議記錄（DOCX、PPTX、TXT、MD），或在下方補充說明，
+                再按「AI 解讀」把內容擷取到表單。這一步可跳過，直接手動填表單也行。
               </div>
 
               {docs.length > 0 && (
@@ -456,35 +287,61 @@ export function ValidationReport() {
                 </div>
               )}
 
-              <div className="vr-input-row">
+              <textarea
+                className="vr-field-input vr-note-input"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={2}
+                placeholder="補充說明（選填）：文件裡沒有、但想讓 AI 一起參考的資訊…"
+              />
+
+              <div className="vr-source-actions">
                 <button
-                  className="vr-attach-btn"
+                  className="btn btn-secondary"
                   onClick={handleFilePick}
                   disabled={isUploading || !sessionId}
-                  title="上傳文件 (DOCX/PPTX/TXT/MD)"
                 >
-                  {isUploading ? <span className="vr-spinner" /> : '📎'}
+                  {isUploading ? <><span className="vr-spinner" /> 上傳中…</> : '📎 上傳文件'}
                 </button>
-                <textarea
-                  ref={inputRef}
-                  className="vr-input"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="輸入回覆… (Enter 送出, Shift+Enter 換行)"
-                  rows={2}
-                  disabled={isLoading}
-                />
                 <button
-                  className="btn btn-primary vr-send-btn"
-                  onClick={handleSend}
-                  disabled={!input.trim() || isLoading}
+                  className="btn btn-primary"
+                  onClick={handleAnalyze}
+                  disabled={isCompiling || !sessionId}
+                  title="讓 AI 讀取上傳文件 + 補充說明，自動填入下方表單"
                 >
-                  送出
+                  {isCompiling ? <><span className="vr-spinner" /> 解讀中…</> : '✨ AI 解讀 → 自動填入表單'}
                 </button>
               </div>
-            </>
-          )}
+            </div>
+
+            {/* Step 2 — the form */}
+            <div className="vr-form-head">
+              <span className="vr-step-num">2</span>
+              <span className="vr-source-title">
+                報告內容（可編輯）{filledCount > 0 ? ` · 已填 ${filledCount} 欄` : ''}
+              </span>
+            </div>
+            <div className="vr-form-hint vr-form-hint--block">
+              以下就是簡報會用到的內容。AI 填完後在這裡檢查／修改，空欄位在報告中顯示 <code>[待補]</code>。
+            </div>
+
+            {FORM_GROUPS.map((group) => (
+              <div className="vr-form-group" key={group.title}>
+                <div className="vr-form-group-title">{group.title}</div>
+                {group.note && <div className="vr-form-group-note">{group.note}</div>}
+                <div className="vr-form-grid">
+                  {group.fields.map((f) => (
+                    <FieldInput
+                      key={f.key}
+                      field={f}
+                      value={form[f.key] ?? ''}
+                      onChange={(v) => handleFieldChange(f.key, v)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
 
           <input
             ref={fileInputRef}
@@ -507,7 +364,7 @@ export function ValidationReport() {
               <div className="vr-preview-placeholder">
                 <div className="vr-preview-icon">📊</div>
                 <div className="vr-preview-text">
-                  {isGenerating ? '正在生成驗證報告，請稍候…' : '填寫報告表單後按「生成報告」查看預覽'}
+                  {isGenerating ? '正在生成驗證報告，請稍候…' : '填寫左側表單後按「生成報告」查看預覽'}
                 </div>
                 {isGenerating && (
                   <div className="vr-progress-bar">
