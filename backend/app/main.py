@@ -57,10 +57,53 @@ def _migrate_user_columns() -> None:
                 conn.execute(text(stmt))
 
 
+def _bootstrap_admin() -> None:
+    """Create an initial admin user from credentials.env if the empno doesn't exist yet.
+
+    Set BOOTSTRAP_ADMIN_EMPNO, BOOTSTRAP_ADMIN_NAME, BOOTSTRAP_ADMIN_PASSWORD in
+    backend/credentials.env. The first startup creates the row; subsequent startups
+    are a no-op because the empno already exists. The env vars can be removed after
+    first boot (optional — they're harmless if left in).
+    """
+    import os
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[2] / "credentials.env")
+
+    empno = os.getenv("BOOTSTRAP_ADMIN_EMPNO", "").strip()
+    name = os.getenv("BOOTSTRAP_ADMIN_NAME", "").strip()
+    password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
+
+    if not empno or not password:
+        return  # not configured
+
+    from .models import User
+    from .services.auth_service import hash_password
+
+    db = SessionLocal()
+    try:
+        if db.query(User).filter_by(empno=empno).first():
+            return  # already exists — don't overwrite
+        user = User(
+            user_id=empno,
+            name=name or empno,
+            is_manager=True,
+            project_ids=[],
+            empno=empno,
+            role="admin",
+            password_hash=hash_password(password),
+        )
+        db.add(user)
+        db.commit()
+        print(f"[bootstrap] Admin account created: {user.name} ({empno})")
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _migrate_user_columns()          # non-destructive schema migration
     Base.metadata.create_all(bind=engine)  # creates login_logs + any missing tables
+    _bootstrap_admin()               # create first admin if credentials.env has BOOTSTRAP_ADMIN_*
     if settings.seed_on_startup:
         db = SessionLocal()
         try:
