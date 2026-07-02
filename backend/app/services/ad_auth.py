@@ -40,10 +40,10 @@ def fqdn_from_base_dn(base_dn: str) -> str:
 def _upn_suffix_candidates(upn_suffix: str, base_dn: str) -> list[str]:
     """The configured UPN suffix doesn't always match the domain's base DN
     (e.g. base DN 'DC=ase,DC=com,DC=tw' but real UPN suffix 'kh.asegroup.com').
-    Try the configured suffix first, then the base-DN-derived one as a fallback,
-    instead of assuming a single guess is always right.
+    upn_suffix may be a comma-separated list of candidates tried in order;
+    a final candidate derived from the base DN is appended as a last resort.
     """
-    candidates = [upn_suffix]
+    candidates = [s.strip() for s in upn_suffix.split(",")] if upn_suffix else []
     if base_dn:
         derived = fqdn_from_base_dn(base_dn)
         if derived:
@@ -88,7 +88,9 @@ def verify_ad_password(
         raise RuntimeError("No AD UPN suffix configured (set APP_AD_UPN_SUFFIX or APP_AD_BASE_DN)")
 
     tls = Tls(validate=ssl.CERT_REQUIRED if tls_verify else ssl.CERT_NONE)
-    ldap_server = Server(server, port=port, use_ssl=use_ssl, tls=tls)
+    # connect_timeout keeps login snappy when AD is unreachable (fall back to
+    # local hash after ~5 s instead of hanging on the OS socket timeout).
+    ldap_server = Server(server, port=port, use_ssl=use_ssl, tls=tls, connect_timeout=5)
 
     saw_unreachable = False
     last_unreachable_exc: Exception | None = None

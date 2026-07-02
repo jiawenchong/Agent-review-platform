@@ -13,8 +13,41 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load from credentials.env next to requirements.txt (same pattern as llm.py).
-load_dotenv(Path(__file__).resolve().parents[2] / "credentials.env")
-_JWT_SECRET: str = os.getenv("JWT_SECRET", "")
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(_BACKEND_DIR / "credentials.env")
+
+
+def _load_or_create_secret() -> str:
+    """JWT signing secret, zero-config.
+
+    Priority: JWT_SECRET env var (credentials.env or host) → backend/.jwt_secret
+    file → auto-generate one and persist it there (gitignored). Persisting means
+    sessions survive backend restarts; deleting the file just logs everyone out.
+    """
+    env_secret = os.getenv("JWT_SECRET", "").strip()
+    if env_secret:
+        return env_secret
+
+    secret_file = _BACKEND_DIR / ".jwt_secret"
+    try:
+        if secret_file.exists():
+            stored = secret_file.read_text(encoding="utf-8").strip()
+            if stored:
+                return stored
+        import secrets
+
+        generated = secrets.token_hex(32)
+        secret_file.write_text(generated, encoding="utf-8")
+        return generated
+    except OSError:
+        # Read-only filesystem etc. — fall back to an ephemeral secret
+        # (sessions won't survive a restart, but login still works).
+        import secrets
+
+        return secrets.token_hex(32)
+
+
+_JWT_SECRET: str = _load_or_create_secret()
 _ALGORITHM = "HS256"
 
 COOKIE_NAME = "govern_auth"
@@ -24,12 +57,6 @@ COOKIE_NAME = "govern_auth"
 
 
 def _require_secret() -> str:
-    if not _JWT_SECRET:
-        raise RuntimeError(
-            "JWT_SECRET is not set. Add it to backend/credentials.env:\n"
-            "  JWT_SECRET=<random hex>\n"
-            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
-        )
     return _JWT_SECRET
 
 

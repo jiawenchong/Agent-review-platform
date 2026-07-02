@@ -49,18 +49,27 @@ class Settings(BaseSettings):
     notification_channel: str = "inapp"  # inapp | email | teams
 
     # --- Active Directory (LDAPS SIMPLE bind) ---
-    # Leave ad_server empty to skip LDAP and fall back to local bcrypt hash only.
-    ad_server: str = ""           # AD host IP / FQDN, e.g. "10.10.10.2"
-    ad_port: int = 636            # 636 = LDAPS; 389 = plain LDAP (not recommended)
+    # Defaults below are the company's known-good values (same ones as the
+    # BudgetAgent reference implementation in ad/config.py), so a fresh clone
+    # logs in against AD with ZERO configuration. Override any of them with
+    # APP_AD_* env vars / credentials.env only if your site differs.
+    # Set APP_AD_SERVER= (empty) to disable AD entirely (offline/demo mode).
+    ad_server: str = "10.10.10.2"          # KHADDC04
+    ad_port: int = 636                     # 636 = LDAPS; 389 = plain LDAP (not recommended)
     ad_use_ssl: bool = True
-    ad_tls_verify: bool = False   # False = accept self-signed internal CA (common on-prem)
-    ad_upn_suffix: str = ""       # UPN suffix, e.g. "kh.asegroup.com" → empno@kh.asegroup.com
-    # Optional: the real UPN suffix doesn't always match the domain's base DN
-    # (e.g. base DN "DC=ase,DC=com,DC=tw" but UPN suffix "kh.asegroup.com").
-    # If set, login also tries "empno@<FQDN derived from ad_base_dn>" as a
-    # second UPN candidate when ad_upn_suffix fails, instead of guessing.
-    ad_base_dn: str = ""          # e.g. "DC=ase,DC=com,DC=tw"
-    ad_domain: str = ""           # NetBIOS domain, e.g. "KH" — only used by /test-ad-login's NTLM probes
+    ad_tls_verify: bool = False            # False = accept self-signed internal CA (common on-prem)
+    # Comma-separated UPN suffix candidates, tried in order. The real suffix
+    # doesn't always match the domain's base DN, so we try the site suffix
+    # first, then the company mail domain.
+    ad_upn_suffix: str = "kh.asegroup.com,aseglobal.com"
+    # If set, an extra candidate is derived from the base DN's DC= parts
+    # (DC=ase,DC=com,DC=tw → ase.com.tw) and appended to the list above.
+    ad_base_dn: str = "DC=ase,DC=com,DC=tw"
+    ad_domain: str = "KH"                  # NetBIOS domain — used by /test-ad-login's NTLM probes
+    # First-admin bootstrap: whoever owns this empno becomes role=admin on
+    # their first successful AD login (see routers/auth.py). Override with
+    # APP_BOOTSTRAP_ADMIN_EMPNO or legacy BOOTSTRAP_ADMIN_EMPNO env var.
+    bootstrap_admin_empno: str = "K20076"
 
     # --- JWT session cookie ---
     jwt_expire_hours: int = 8     # Token lifetime; 8 h = one work day

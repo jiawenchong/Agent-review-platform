@@ -22,6 +22,9 @@ backend/credentials.env
 backend/credentials.bat
 backend/credentials.sh
 
+# Auto-generated JWT signing secret (created on first backend startup) — never commit
+backend/.jwt_secret
+
 # Claude Code agent worktrees (created by isolation: "worktree" runs, ephemeral)
 .claude/worktrees/
 

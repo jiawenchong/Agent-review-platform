@@ -39,8 +39,12 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # solves the bootstrap chicken-and-egg problem (need an admin to grant admin
 # rights via the 使用者管理 page, but there isn't one yet). No password lives
 # here: the actual credential check is always the user's own AD login.
+# Default comes from settings.bootstrap_admin_empno; the legacy
+# BOOTSTRAP_ADMIN_EMPNO env var (credentials.env) still wins if set.
 load_dotenv(Path(__file__).resolve().parents[2] / "credentials.env")
-_BOOTSTRAP_ADMIN_EMPNO = os.getenv("BOOTSTRAP_ADMIN_EMPNO", "").strip()
+_BOOTSTRAP_ADMIN_EMPNO = (
+    os.getenv("BOOTSTRAP_ADMIN_EMPNO", "").strip() or settings.bootstrap_admin_empno.strip()
+)
 
 # ── rate limiter (in-memory, per IP) ────────────────────────────────────────
 
@@ -349,10 +353,8 @@ def test_ad_login(body: LoginRequest, request: Request) -> dict:
 
     import ssl as ssl_module
 
-    fqdn = ad_auth.fqdn_from_base_dn(settings.ad_base_dn) if settings.ad_base_dn else ""
+    upn_candidates = ad_auth._upn_suffix_candidates(settings.ad_upn_suffix, settings.ad_base_dn)
     user_nt = f"{settings.ad_domain}\\{empno}" if settings.ad_domain else None
-    user_upn_configured = f"{empno}@{settings.ad_upn_suffix}" if settings.ad_upn_suffix else None
-    user_upn_fqdn = f"{empno}@{fqdn}" if fqdn else None
     tls = Tls(validate=ssl_module.CERT_NONE)
 
     result: dict = {
@@ -360,25 +362,17 @@ def test_ad_login(body: LoginRequest, request: Request) -> dict:
         "domain": settings.ad_domain,
         "upn_suffix": settings.ad_upn_suffix,
         "base_dn": settings.ad_base_dn,
-        "fqdn_from_base_dn": fqdn,
+        "upn_candidates": upn_candidates,
         "attempts": [],
     }
 
     strategies: list[tuple[str, dict]] = []
-    if user_upn_configured:
+    for suffix in upn_candidates:
         strategies.append((
-            "SIMPLE UPN (設定的 suffix) / LDAPS 636",
+            f"SIMPLE UPN @{suffix} / LDAPS 636",
             dict(
                 server=Server(settings.ad_server, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
-                user=user_upn_configured, authentication=SIMPLE,
-            ),
-        ))
-    if user_upn_fqdn and user_upn_fqdn != user_upn_configured:
-        strategies.append((
-            "SIMPLE UPN (由 base DN 推導的 FQDN) / LDAPS 636",
-            dict(
-                server=Server(settings.ad_server, port=636, use_ssl=True, tls=tls, get_info=LDAP_NONE),
-                user=user_upn_fqdn, authentication=SIMPLE,
+                user=f"{empno}@{suffix}", authentication=SIMPLE,
             ),
         ))
     if user_nt:
