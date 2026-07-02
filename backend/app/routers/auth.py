@@ -11,11 +11,14 @@ Security design
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -31,6 +34,13 @@ from ..services.auth_service import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# Whoever holds this empno is auto-promoted to role="admin" on every login —
+# solves the bootstrap chicken-and-egg problem (need an admin to grant admin
+# rights via the 使用者管理 page, but there isn't one yet). No password lives
+# here: the actual credential check is always the user's own AD login.
+load_dotenv(Path(__file__).resolve().parents[2] / "credentials.env")
+_BOOTSTRAP_ADMIN_EMPNO = os.getenv("BOOTSTRAP_ADMIN_EMPNO", "").strip()
 
 # ── rate limiter (in-memory, per IP) ────────────────────────────────────────
 
@@ -138,13 +148,14 @@ def login(
         authenticated = True
 
     # ── Auto-create user on first successful AD login ────────────────────────
+    is_bootstrap_admin = bool(_BOOTSTRAP_ADMIN_EMPNO) and empno == _BOOTSTRAP_ADMIN_EMPNO
     if user is None:
         user = User(
             user_id=empno,
             name=empno,
             empno=empno,
-            role="member",
-            is_manager=False,
+            role="admin" if is_bootstrap_admin else "member",
+            is_manager=is_bootstrap_admin,
             project_ids=[],
         )
         db.add(user)
@@ -154,6 +165,14 @@ def login(
     # Backfill empno for pre-existing users that didn't have it set.
     if not user.empno:
         user.empno = empno
+        db.commit()
+
+    # Self-healing promotion: if credentials.env designates this empno as the
+    # bootstrap admin but the DB row isn't admin yet (e.g. config was added
+    # after the first login), promote it now. Idempotent — safe every login.
+    if is_bootstrap_admin and user.role != "admin":
+        user.role = "admin"
+        user.is_manager = True
         db.commit()
 
     # ── Write login log (best-effort, never blocks login) ────────────────────

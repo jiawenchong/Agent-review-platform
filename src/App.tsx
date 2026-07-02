@@ -11,10 +11,11 @@ import { Report } from './pages/Report';
 import { AuditLog } from './pages/AuditLog';
 import { ValidationReport } from './pages/ValidationReport';
 import { Login } from './pages/Login';
+import { UserManagement } from './pages/UserManagement';
 
 // Wraps the authenticated part of the app. Redirects to /login if no session.
 function ProtectedApp() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isAdmin } = useAuth();
 
   if (isLoading) {
     return (
@@ -40,6 +41,10 @@ function ProtectedApp() {
             <Route path="/report" element={<Report />} />
             <Route path="/audit" element={<AuditLog />} />
             <Route path="/validation-report" element={<ValidationReport />} />
+            <Route
+              path="/users"
+              element={isAdmin ? <UserManagement /> : <Navigate to="/" replace />}
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>

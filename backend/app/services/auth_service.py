@@ -13,7 +13,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load from credentials.env next to requirements.txt (same pattern as llm.py).
-load_dotenv(Path(__file__).resolve().parents[3] / "credentials.env")
+load_dotenv(Path(__file__).resolve().parents[2] / "credentials.env")
 _JWT_SECRET: str = os.getenv("JWT_SECRET", "")
 _ALGORITHM = "HS256"
 

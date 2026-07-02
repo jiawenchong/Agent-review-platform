@@ -42,6 +42,13 @@ def current_user(
     return user
 
 
+def require_admin(user: User = Depends(current_user)) -> User:
+    """Gate for role-management endpoints — only role == 'admin', not managers."""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="僅限管理員(admin)執行此操作")
+    return user
+
+
 def require_project_access(project_id: str, user: User, db: Session) -> None:
     """ACL gate. Admins/managers see everything; members only their listed projects."""
     is_elevated = user.is_manager or (user.role in ("admin", "manager"))

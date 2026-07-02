@@ -2,7 +2,14 @@ import { NavLink } from 'react-router-dom';
 import { useNotifications } from '../context/NotificationContext';
 import { useAuth } from '../context/AuthContext';
 
-const NAV_ITEMS = [
+interface NavItem {
+  num: string;
+  label: string;
+  to: string;
+  showBadge?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
   { num: '01', label: '規劃書評估', to: '/upload' },
   { num: '02', label: '專案儀表板', to: '/' },
   { num: '04', label: '通知中心', to: '/notifications', showBadge: true },
@@ -11,9 +18,11 @@ const NAV_ITEMS = [
   { num: '07', label: 'AI 驗證報告', to: '/validation-report' },
 ];
 
+const ADMIN_NAV_ITEM: NavItem = { num: '08', label: '使用者管理', to: '/users' };
+
 export function Sidebar() {
   const { unreadCount } = useNotifications();
-  const { user, isManager, logout } = useAuth();
+  const { user, isManager, isAdmin, logout } = useAuth();
 
   const handleLogout = async () => {
     await logout();
@@ -21,6 +30,7 @@ export function Sidebar() {
   };
 
   const roleBadge = isManager ? '主管' : '成員';
+  const navItems = isAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   return (
     <aside className="sidebar">
@@ -29,7 +39,7 @@ export function Sidebar() {
         <div className="sidebar-title">Agent 開發<br />進度管控</div>
       </div>
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

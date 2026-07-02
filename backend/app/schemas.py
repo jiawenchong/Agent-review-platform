@@ -193,3 +193,9 @@ class UserOut(ORMModel):
     name: str
     is_manager: bool
     project_ids: list[str]
+    role: str | None
+    empno: str | None
+
+
+class UserRoleUpdate(BaseModel):
+    role: str

@@ -77,15 +77,26 @@ export function listDocuments(): Promise<ApiDocumentSummary[]> {
 
 // ── users ──────────────────────────────────────────────────────────────
 
+export type ApiRole = 'admin' | 'manager' | 'member';
+
 export interface ApiUser {
   user_id: string;
   name: string;
   is_manager: boolean;
   project_ids: string[];
+  role: ApiRole | null;
+  empno: string | null;
 }
 
 export function listUsers(): Promise<ApiUser[]> {
   return apiFetch<ApiUser[]>('/api/users');
+}
+
+export function updateUserRole(userId: string, role: ApiRole): Promise<ApiUser> {
+  return apiFetch<ApiUser>(`/api/users/${encodeURIComponent(userId)}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
 }
 
 // ── projects ───────────────────────────────────────────────────────────
