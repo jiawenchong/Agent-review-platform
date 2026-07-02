@@ -3,9 +3,20 @@
 JWT_SECRET is loaded from credentials.env (the same file used for ProphetAI
 keys) so no secrets ever reach version control. The cookie is httpOnly,
 SameSite=Lax — invisible to JS and CSRF-safe for state-changing methods.
+
+The HS256 JWT is implemented directly on the standard library (hmac / hashlib /
+base64) rather than via PyJWT. Two different PyPI packages both import as
+``jwt`` (PyJWT vs. the unrelated "jwt" package), and on some locked-down hosts
+the wrong one shadows the right one — ``jwt.encode`` then vanishes and every
+login 500s. Owning the ~30 lines of HS256 removes that dependency-hell class of
+bug entirely; HS256 is just an HMAC over two base64url segments.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -53,32 +64,83 @@ _ALGORITHM = "HS256"
 COOKIE_NAME = "govern_auth"
 
 
-# ── JWT ──────────────────────────────────────────────────────────────────────
+# ── JWT (self-contained HS256, no PyJWT dependency) ───────────────────────────
+
+
+class TokenError(Exception):
+    """Raised when a token is missing, malformed, tampered, or expired."""
+
+
+class TokenExpired(TokenError):
+    """Raised specifically when a token's exp claim is in the past."""
 
 
 def _require_secret() -> str:
     return _JWT_SECRET
 
 
-def create_token(user_id: str, role: str, name: str, expire_hours: int = 8) -> str:
-    """Return a signed JWT containing the minimal identity claims."""
-    import jwt
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
+
+def _b64url_decode(segment: str) -> bytes:
+    padding = "=" * (-len(segment) % 4)
+    return base64.urlsafe_b64decode(segment + padding)
+
+
+def _sign(signing_input: bytes, secret: str) -> str:
+    sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    return _b64url_encode(sig)
+
+
+def create_token(user_id: str, role: str, name: str, expire_hours: int = 8) -> str:
+    """Return a signed HS256 JWT containing the minimal identity claims."""
     secret = _require_secret()
+    header = {"alg": _ALGORITHM, "typ": "JWT"}
+    exp = datetime.now(tz=timezone.utc) + timedelta(hours=expire_hours)
     payload = {
         "sub": user_id,
         "role": role,
         "name": name,
-        "exp": datetime.now(tz=timezone.utc) + timedelta(hours=expire_hours),
+        "exp": int(exp.timestamp()),
     }
-    return jwt.encode(payload, secret, algorithm=_ALGORITHM)
+    header_seg = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_seg = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_seg}.{payload_seg}".encode("ascii")
+    signature = _sign(signing_input, secret)
+    return f"{header_seg}.{payload_seg}.{signature}"
 
 
 def decode_token(token: str) -> dict:
-    """Decode and verify a JWT. Raises jwt.InvalidTokenError on any failure."""
-    import jwt
+    """Verify signature + expiry and return the claims.
 
-    return jwt.decode(token, _require_secret(), algorithms=[_ALGORITHM])
+    Raises TokenExpired if the token has expired, TokenError for any other
+    failure (malformed, bad signature, missing claims).
+    """
+    secret = _require_secret()
+    try:
+        header_seg, payload_seg, signature = token.split(".")
+    except (ValueError, AttributeError):
+        raise TokenError("malformed token")
+
+    signing_input = f"{header_seg}.{payload_seg}".encode("ascii")
+    expected = _sign(signing_input, secret)
+    # Constant-time comparison to avoid signature-timing side channels.
+    if not hmac.compare_digest(expected, signature):
+        raise TokenError("bad signature")
+
+    try:
+        payload = json.loads(_b64url_decode(payload_seg))
+    except (ValueError, json.JSONDecodeError):
+        raise TokenError("malformed payload")
+
+    exp = payload.get("exp")
+    if exp is not None:
+        now = int(datetime.now(tz=timezone.utc).timestamp())
+        if now >= int(exp):
+            raise TokenExpired("token expired")
+
+    return payload
 
 
 # ── bcrypt ───────────────────────────────────────────────────────────────────

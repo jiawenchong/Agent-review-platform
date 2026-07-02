@@ -21,8 +21,7 @@ def current_user(
     request: Request,
     db: Session = Depends(get_db),
 ) -> User:
-    from .services.auth_service import COOKIE_NAME, decode_token
-    import jwt as pyjwt
+    from .services.auth_service import COOKIE_NAME, TokenExpired, decode_token
 
     token = request.cookies.get(COOKIE_NAME)
     if not token:
@@ -30,7 +29,7 @@ def current_user(
 
     try:
         payload = decode_token(token)
-    except pyjwt.ExpiredSignatureError:
+    except TokenExpired:
         raise HTTPException(status_code=401, detail="登入已過期，請重新登入")
     except Exception:
         raise HTTPException(status_code=401, detail="Token 無效，請重新登入")
