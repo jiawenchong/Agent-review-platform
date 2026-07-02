@@ -28,9 +28,14 @@ export interface CreateSessionResponse {
   session_id: string;
 }
 
+/** Structured report data — flat keys matching the PPTX template (see prompt.md). */
+export type ReportForm = Record<string, unknown>;
+
 export interface ChatResponse {
   response: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  data: ReportForm;
+  llm_available: boolean;
 }
 
 export interface GenerateResponse {
@@ -38,15 +43,14 @@ export interface GenerateResponse {
   has_pdf: boolean;
 }
 
-/** Structured report data — flat keys matching the PPTX template (see prompt.md). */
-export type ReportForm = Record<string, unknown>;
-
 export interface UploadResponse {
   filename: string;
   kind: string;
   char_count: number;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   document_count: number;
+  data: ReportForm;
+  llm_available: boolean;
 }
 
 export interface CompileResponse {
@@ -62,14 +66,17 @@ export async function createSession(): Promise<CreateSessionResponse> {
   });
 }
 
-/** Send a user message to the session; returns the assistant reply + full history. */
+/** Send a user message; returns the assistant reply, full history, and the
+ *  freshly re-compiled form data. `empty_fields` (labels still blank) lets the
+ *  assistant target its questions at what's missing. */
 export async function sendMessage(
   session_id: string,
   message: string,
+  empty_fields: string[] = [],
 ): Promise<ChatResponse> {
   return apiFetch<ChatResponse>('/api/validation-report/chat', {
     method: 'POST',
-    body: JSON.stringify({ session_id, message }),
+    body: JSON.stringify({ session_id, message, empty_fields }),
   });
 }
 

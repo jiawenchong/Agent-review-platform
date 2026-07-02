@@ -135,6 +135,35 @@ export function flattenToForm(data: Record<string, unknown>): Record<string, str
   return form;
 }
 
+/** Merge AI-compiled data into current form: fill blanks only, never overwrite
+ *  what the user already typed. Returns [newForm, filledCount]. */
+export function mergeCompiled(
+  prev: Record<string, string>,
+  data: Record<string, unknown>,
+): [Record<string, string>, number] {
+  const filled = flattenToForm(data);
+  const merged = { ...prev };
+  let count = 0;
+  for (const [k, v] of Object.entries(filled)) {
+    if (v && !merged[k]?.trim()) {
+      merged[k] = v;
+      count += 1;
+    }
+  }
+  return [merged, count];
+}
+
+/** Labels of fields still empty — passed to the interview so it asks about these. */
+export function emptyFieldLabels(form: Record<string, string>): string[] {
+  const labels: string[] = [];
+  for (const group of FORM_GROUPS) {
+    for (const f of group.fields) {
+      if (!form[f.key]?.trim()) labels.push(f.label);
+    }
+  }
+  return labels;
+}
+
 /** Build the nested JSON payload the PPTX generator expects from flat form state. */
 export function formToPayload(form: Record<string, string>): Record<string, unknown> {
   const payload: Record<string, unknown> = {};

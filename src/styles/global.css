@@ -852,6 +852,58 @@ a {
   border: 1px solid var(--green-border);
 }
 
+/* ── Tabs (right panel: assistant / preview) ── */
+
+.vr-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.vr-tab {
+  padding: 9px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.vr-tab--active {
+  color: var(--green-text);
+  border-bottom-color: var(--green);
+  background: var(--surface-alt);
+}
+
+/* ── "refresh form" link under the chat ── */
+
+.vr-assistant-actions {
+  padding: 6px 16px 0;
+  flex-shrink: 0;
+}
+
+.vr-compile-link {
+  border: none;
+  background: transparent;
+  color: var(--green-text);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.vr-compile-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .vr-messages {
   flex: 1;
   overflow-y: auto;

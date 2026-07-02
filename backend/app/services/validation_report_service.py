@@ -84,13 +84,19 @@ def _documents_block(documents: list[dict] | None) -> str:
     return "\n\n".join(parts)
 
 
-def get_interview_response(messages: list[dict], documents: list[dict] | None = None) -> str:
+def get_interview_response(
+    messages: list[dict],
+    documents: list[dict] | None = None,
+    empty_fields: list[str] | None = None,
+) -> str:
     """Call the interview LLM with full conversation history.
 
     messages: [{"role": "user"|"assistant", "content": str}, ...]
     documents: optional uploaded files whose extracted text is folded into the
     system prompt so the assistant can read and analyse them (kept out of the
     visible chat history so the UI stays clean).
+    empty_fields: labels of form fields still blank, so the assistant asks about
+    those specifically instead of re-asking what's already filled.
 
     Returns the assistant's text response, or a fallback string if LLM unavailable.
     """
@@ -102,6 +108,13 @@ def get_interview_response(messages: list[dict], documents: list[dict] | None = 
             f"{system}\n\n{docs}\n\n"
             "(請根據以上使用者上傳的文件內容,主動幫他整理驗證報告所需的資訊,"
             "並針對文件中缺漏或不清楚的部分提問。)"
+        )
+
+    if empty_fields:
+        listed = "、".join(empty_fields)
+        system = (
+            f"{system}\n\n=== 目前表單還空著的欄位 ===\n{listed}\n"
+            "(請優先針對這些欄位提問,每次 1~2 題;防護欄與黃金測試情境若使用者要你代擬就直接幫他擬。)"
         )
 
     try:

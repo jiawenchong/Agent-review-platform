@@ -37,6 +37,7 @@ _sessions: dict[str, dict] = {}
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    empty_fields: list[str] = []
 
 
 class CompileRequest(BaseModel):
@@ -89,13 +90,25 @@ def chat(body: ChatRequest) -> dict:
     # Append the new user message
     messages.append({"role": "user", "content": body.message})
 
-    # Get LLM response (never raises — falls back to stub message on error)
-    response = svc.get_interview_response(messages, documents=session.get("documents"))
+    # 1) Refresh the structured form from everything said + uploaded so far.
+    data = svc.compile_json(messages, documents=session.get("documents"))
+
+    # 2) Interview: ask about fields still empty (never raises — stub on error).
+    response = svc.get_interview_response(
+        messages,
+        documents=session.get("documents"),
+        empty_fields=body.empty_fields,
+    )
 
     # Append assistant response
     messages.append({"role": "assistant", "content": response})
 
-    return {"response": response, "messages": messages}
+    return {
+        "response": response,
+        "messages": messages,
+        "data": data,
+        "llm_available": svc.validation_llm_available(),
+    }
 
 
 @router.post("/upload")
@@ -129,12 +142,17 @@ async def upload_document(
     response = svc.get_interview_response(messages, documents=documents)
     messages.append({"role": "assistant", "content": response})
 
+    # Compile immediately so the form fills right after upload.
+    data = svc.compile_json(messages, documents=documents)
+
     return {
         "filename": file.filename,
         "kind": kind,
         "char_count": len(text),
         "messages": messages,
         "document_count": len(documents),
+        "data": data,
+        "llm_available": svc.validation_llm_available(),
     }
 
 

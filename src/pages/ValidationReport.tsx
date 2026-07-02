@@ -6,19 +6,54 @@ import {
   downloadUrl,
   generateReport,
   previewUrl,
+  sendMessage,
   uploadDocument,
 } from '../api/validationReportClient';
 import {
   FORM_GROUPS,
   emptyForm,
-  flattenToForm,
+  emptyFieldLabels,
   formToPayload,
+  mergeCompiled,
   type FormField,
 } from '../data/validationReportFields';
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 interface UploadedDoc {
   filename: string;
   char_count: number;
+}
+
+type RightTab = 'assistant' | 'preview';
+
+// ── Typing indicator + message bubble ──────────────────────────────────────
+
+function TypingIndicator() {
+  return (
+    <div className="vr-message vr-message--assistant">
+      <div className="vr-avatar">AI</div>
+      <div className="vr-bubble vr-bubble--assistant vr-typing">
+        <span /><span /><span />
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({ msg }: { msg: Message }) {
+  const isUser = msg.role === 'user';
+  return (
+    <div className={`vr-message ${isUser ? 'vr-message--user' : 'vr-message--assistant'}`}>
+      {!isUser && <div className="vr-avatar">AI</div>}
+      <div className={`vr-bubble ${isUser ? 'vr-bubble--user' : 'vr-bubble--assistant'}`}>
+        {msg.content}
+      </div>
+      {isUser && <div className="vr-avatar vr-avatar--user">你</div>}
+    </div>
+  );
 }
 
 // ── Form field renderer ────────────────────────────────────────────────────
@@ -40,12 +75,7 @@ function FieldInput({
         {field.help && <span className="vr-field-help">{field.help}</span>}
       </label>
       {field.type === 'textarea' ? (
-        <textarea
-          className="vr-field-input"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={2}
-        />
+        <textarea className="vr-field-input" value={value} onChange={(e) => onChange(e.target.value)} rows={2} />
       ) : (
         <input
           className="vr-field-input"
@@ -58,14 +88,17 @@ function FieldInput({
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────────────
+// ── Main Component ──────────────────────────────────────────────────────────
 
 export function ValidationReport() {
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [tab, setTab] = useState<RightTab>('assistant');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
   const [docs, setDocs] = useState<UploadedDoc[]>([]);
-  const [note, setNote] = useState('');
   const [form, setForm] = useState<Record<string, string>>(emptyForm());
 
+  const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -75,9 +108,13 @@ export function ValidationReport() {
   const [notice, setNotice] = useState<string | null>(null);
   const [pdfKey, setPdfKey] = useState(0);
 
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Keep a ref to the latest form so async handlers read fresh empty-field labels.
+  const formRef = useRef(form);
+  formRef.current = form;
 
-  // Create a session on mount so upload / AI-fill / generate all work.
   useEffect(() => {
     let cancelled = false;
     createSession()
@@ -92,6 +129,63 @@ export function ValidationReport() {
     };
   }, []);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
+
+  const applyCompiled = (data: Record<string, unknown>): number => {
+    let filled = 0;
+    setForm((prev) => {
+      const [merged, count] = mergeCompiled(prev, data);
+      filled = count;
+      return merged;
+    });
+    return filled;
+  };
+
+  const handleStartInterview = async () => {
+    if (!sessionId) return;
+    setError(null);
+    setIsLoading(true);
+    try {
+      const res = await sendMessage(sessionId, '開始', emptyFieldLabels(formRef.current));
+      setMessages(res.messages);
+      applyCompiled(res.data);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '啟動訪談失敗，請稍後再試。');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!sessionId || !input.trim() || isLoading) return;
+    const text = input.trim();
+    setInput('');
+    setError(null);
+    setIsLoading(true);
+    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    try {
+      const res = await sendMessage(sessionId, text, emptyFieldLabels(formRef.current));
+      setMessages(res.messages);
+      const filled = applyCompiled(res.data);
+      if (filled > 0) setNotice(`AI 依你的回覆更新了左側表單的 ${filled} 個欄位。`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '傳送失敗，請稍後再試。');
+      setMessages((prev) => prev.slice(0, -1));
+    } finally {
+      setIsLoading(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
   const handleFilePick = () => fileInputRef.current?.click();
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -100,45 +194,40 @@ export function ValidationReport() {
     if (!file || !sessionId) return;
     setError(null);
     setIsUploading(true);
+    setIsLoading(true);
     try {
       const res = await uploadDocument(sessionId, file);
       setDocs((prev) => [...prev, { filename: res.filename, char_count: res.char_count }]);
-      setNotice(`已上傳「${res.filename}」（${res.char_count} 字）。按下方「AI 解讀 → 自動填入表單」讓 AI 擷取內容。`);
+      setMessages(res.messages);
+      const filled = applyCompiled(res.data);
+      setNotice(
+        filled > 0
+          ? `已讀取「${res.filename}」，AI 自動填入左側表單 ${filled} 個欄位。缺的欄位我會在對話中問你。`
+          : `已上傳「${res.filename}」。可在對話中繼續補充，AI 會邊問邊幫你填表單。`,
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '文件上傳失敗，請確認格式為 DOCX/PPTX/TXT/MD。');
     } finally {
       setIsUploading(false);
+      setIsLoading(false);
     }
   };
 
-  const handleAnalyze = async () => {
+  const handleCompile = async () => {
     if (!sessionId || isCompiling) return;
     setError(null);
     setIsCompiling(true);
     try {
-      const { data, llm_available, has_source } = await compileForm(sessionId, note);
-      const filled = flattenToForm(data);
-      setForm((prev) => {
-        const merged = { ...prev };
-        for (const [k, v] of Object.entries(filled)) {
-          if (v && !merged[k]?.trim()) merged[k] = v;
-        }
-        return merged;
-      });
-      const filledCount = Object.values(filled).filter((v) => v.trim()).length;
-      if (filledCount > 0) {
-        setNotice(
-          `AI 已擷取 ${filledCount} 個欄位並填入下方表單（只填空白欄位，不覆蓋你已改的）。請檢查、補齊後生成。`,
-        );
+      const { data, llm_available, has_source } = await compileForm(sessionId);
+      const filled = applyCompiled(data);
+      if (filled > 0) {
+        setNotice(`AI 已擷取並填入 ${filled} 個欄位（只填空白，不覆蓋你已改的）。`);
       } else if (!has_source) {
-        setNotice('還沒有可解讀的內容 — 請先上傳文件，或在上方補充說明欄位輸入資訊，再按此按鈕。');
+        setNotice('還沒有可解讀的內容 — 請先上傳文件或在對話中提供資訊。');
       } else if (!llm_available) {
-        setError(
-          'AI 解讀服務未設定（credentials.env 的 COMPANY_VALIDATION_KEY / COMPANY_VALIDATION_AGENT 未填）。' +
-            '你仍可手動填寫下方表單後直接生成報告。',
-        );
+        setError('AI 解讀服務未設定（COMPANY_VALIDATION_KEY / COMPANY_VALIDATION_AGENT 未填）。你仍可手動填表單後生成。');
       } else {
-        setNotice('AI 這次沒能擷取到可對應的欄位，請在補充說明加上更多細節，或直接手動填寫下方表單。');
+        setNotice('AI 這次沒能擷取到新欄位，請在對話中補充更多細節。');
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'AI 解讀失敗，請稍後再試。');
@@ -161,6 +250,7 @@ export function ValidationReport() {
         setGenerated(true);
         setHasPdf(result.has_pdf);
         setPdfKey((k) => k + 1);
+        setTab('preview');
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '報告生成失敗，請稍後再試。');
@@ -177,14 +267,15 @@ export function ValidationReport() {
         /* ignore */
       }
     }
+    setMessages([]);
+    setInput('');
     setDocs([]);
-    setNote('');
     setForm(emptyForm());
     setGenerated(false);
     setHasPdf(false);
     setError(null);
     setNotice(null);
-    setIsGenerating(false);
+    setTab('assistant');
     try {
       const { session_id } = await createSession();
       setSessionId(session_id);
@@ -197,7 +288,7 @@ export function ValidationReport() {
 
   return (
     <div className="vr-page">
-      {/* ── Page Header ── */}
+      {/* ── Header ── */}
       <div className="page-header vr-page-header">
         <div className="vr-header-left">
           <div className="eyebrow">07 · Validation Report</div>
@@ -205,51 +296,19 @@ export function ValidationReport() {
         </div>
         <div className="vr-header-actions">
           {generated && sessionId && (
-            <a
-              href={downloadUrl(sessionId)}
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-secondary"
-              style={{ textDecoration: 'none' }}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 12l-4-4h2.5V3h3v5H12L8 12z" />
-                <rect x="2" y="13" width="12" height="1.5" rx="0.75" />
-              </svg>
+            <a href={downloadUrl(sessionId)} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
               下載 PPTX
             </a>
           )}
-          <button className="btn btn-secondary" onClick={handleClear} disabled={isGenerating}>
-            清除重來
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleGenerate}
-            disabled={isGenerating || !sessionId}
-            title="以下方表單內容生成 PPTX"
-          >
-            {isGenerating ? (
-              <>
-                <span className="vr-spinner" />
-                生成中…
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M13.5 2h-11A1.5 1.5 0 001 3.5v9A1.5 1.5 0 002.5 14h11a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0013.5 2zM5 11V5l7 3-7 3z" />
-                </svg>
-                生成報告
-              </>
-            )}
+          <button className="btn btn-secondary" onClick={handleClear} disabled={isGenerating}>清除重來</button>
+          <button className="btn btn-primary" onClick={handleGenerate} disabled={isGenerating || !sessionId} title="以左側表單內容生成 PPTX">
+            {isGenerating ? <><span className="vr-spinner" />生成中…</> : '生成報告'}
           </button>
         </div>
       </div>
 
       {error && (
         <div className="vr-error-bar">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4h1.5v4.5h-1.5V5zm0 5.5h1.5V12h-1.5v-1.5z" />
-          </svg>
           {error}
           <button onClick={() => setError(null)} className="vr-error-dismiss">✕</button>
         </div>
@@ -261,145 +320,132 @@ export function ValidationReport() {
         </div>
       )}
 
-      {/* ── Two-panel layout: [source + form] | [preview] ── */}
+      {/* ── Two-panel: [live form] | [assistant / preview] ── */}
       <div className="vr-body">
-        {/* Left: unified source + form */}
+        {/* Left: the form (the deliverable), fills live as the AI works */}
         <div className="vr-chat-panel card">
+          <div className="vr-chat-header">
+            <span className="vr-chat-title">報告內容（可編輯）{filledCount > 0 ? ` · 已填 ${filledCount} 欄` : ''}</span>
+          </div>
+          <div className="vr-form-hint vr-form-hint--block" style={{ padding: '10px 16px 0' }}>
+            右側可上傳文件或跟 AI 對話，AI 會邊問邊把內容填到這裡。空欄位在報告中顯示 <code>[待補]</code>。
+          </div>
           <div className="vr-form-scroll">
-            {/* Step 1 — source (upload + AI note) */}
-            <div className="vr-source-box">
-              <div className="vr-source-head">
-                <span className="vr-step-num">1</span>
-                <span className="vr-source-title">上傳報告／來源，讓 AI 幫你填</span>
-              </div>
-              <div className="vr-source-hint">
-                上傳規劃書 / 測試結果 / 會議記錄（DOCX、PPTX、TXT、MD），或在下方補充說明，
-                再按「AI 解讀」把內容擷取到表單。這一步可跳過，直接手動填表單也行。
-              </div>
-
-              {docs.length > 0 && (
-                <div className="vr-doc-chips">
-                  {docs.map((d, i) => (
-                    <span className="vr-doc-chip" key={i} title={`${d.char_count} 字`}>
-                      📄 {d.filename}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <textarea
-                className="vr-field-input vr-note-input"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={2}
-                placeholder="補充說明（選填）：文件裡沒有、但想讓 AI 一起參考的資訊…"
-              />
-
-              <div className="vr-source-actions">
-                <button
-                  className="btn btn-secondary"
-                  onClick={handleFilePick}
-                  disabled={isUploading || !sessionId}
-                >
-                  {isUploading ? <><span className="vr-spinner" /> 上傳中…</> : '📎 上傳文件'}
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleAnalyze}
-                  disabled={isCompiling || !sessionId}
-                  title="讓 AI 讀取上傳文件 + 補充說明，自動填入下方表單"
-                >
-                  {isCompiling ? <><span className="vr-spinner" /> 解讀中…</> : '✨ AI 解讀 → 自動填入表單'}
-                </button>
-              </div>
-            </div>
-
-            {/* Step 2 — the form */}
-            <div className="vr-form-head">
-              <span className="vr-step-num">2</span>
-              <span className="vr-source-title">
-                報告內容（可編輯）{filledCount > 0 ? ` · 已填 ${filledCount} 欄` : ''}
-              </span>
-            </div>
-            <div className="vr-form-hint vr-form-hint--block">
-              以下就是簡報會用到的內容。AI 填完後在這裡檢查／修改，空欄位在報告中顯示 <code>[待補]</code>。
-            </div>
-
             {FORM_GROUPS.map((group) => (
               <div className="vr-form-group" key={group.title}>
                 <div className="vr-form-group-title">{group.title}</div>
                 {group.note && <div className="vr-form-group-note">{group.note}</div>}
                 <div className="vr-form-grid">
                   {group.fields.map((f) => (
-                    <FieldInput
-                      key={f.key}
-                      field={f}
-                      value={form[f.key] ?? ''}
-                      onChange={(v) => handleFieldChange(f.key, v)}
-                    />
+                    <FieldInput key={f.key} field={f} value={form[f.key] ?? ''} onChange={(v) => handleFieldChange(f.key, v)} />
                   ))}
                 </div>
               </div>
             ))}
           </div>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".docx,.pptx,.txt,.md"
-            style={{ display: 'none' }}
-            onChange={handleFileChange}
-          />
         </div>
 
-        {/* Right: Preview */}
+        {/* Right: assistant (chat + upload) / preview */}
         <div className="vr-preview-panel card">
-          <div className="vr-chat-header">
-            <span className="vr-chat-title">報告預覽</span>
-            {generated && <span className="vr-status-badge vr-status-badge--green">已生成</span>}
+          <div className="vr-tabs">
+            <button className={`vr-tab ${tab === 'assistant' ? 'vr-tab--active' : ''}`} onClick={() => setTab('assistant')}>
+              🎙️ AI 助手{docs.length > 0 ? ` (${docs.length})` : ''}
+            </button>
+            <button className={`vr-tab ${tab === 'preview' ? 'vr-tab--active' : ''}`} onClick={() => setTab('preview')}>
+              📊 報告預覽{generated ? ' ✓' : ''}
+            </button>
           </div>
 
-          <div className="vr-preview-body">
-            {!generated ? (
-              <div className="vr-preview-placeholder">
-                <div className="vr-preview-icon">📊</div>
-                <div className="vr-preview-text">
-                  {isGenerating ? '正在生成驗證報告，請稍候…' : '填寫左側表單後按「生成報告」查看預覽'}
-                </div>
-                {isGenerating && (
-                  <div className="vr-progress-bar">
-                    <div className="vr-progress-fill" />
+          {tab === 'assistant' ? (
+            <>
+              <div className="vr-messages">
+                {messages.length === 0 && !isLoading && (
+                  <div className="vr-empty-state">
+                    <div className="vr-empty-icon">🎙️</div>
+                    <div className="vr-empty-title">上傳文件或開始訪談</div>
+                    <div className="vr-empty-desc">
+                      上傳規劃書 / 測試結果（DOCX、PPTX、TXT、MD），AI 會讀取並幫你把內容填進左側表單，
+                      再針對還缺的欄位訪談你。防護欄、黃金測試情境你沒提供時 AI 會依 Agent 用途幫你草擬。
+                    </div>
+                    <div className="vr-empty-actions">
+                      <button className="btn btn-secondary" onClick={handleFilePick} disabled={isUploading || !sessionId}>
+                        📎 上傳文件
+                      </button>
+                      <button className="btn btn-primary" onClick={handleStartInterview} disabled={isLoading || !sessionId}>
+                        開始訪談
+                      </button>
+                    </div>
                   </div>
                 )}
+                {messages.map((msg, i) => <MessageBubble key={i} msg={msg} />)}
+                {isLoading && <TypingIndicator />}
+                <div ref={messagesEndRef} />
               </div>
-            ) : hasPdf && sessionId ? (
-              <iframe
-                key={pdfKey}
-                src={previewUrl(sessionId)}
-                className="vr-pdf-iframe"
-                title="驗證報告 PDF 預覽"
-              />
-            ) : (
-              <div className="vr-preview-placeholder">
-                <div className="vr-preview-icon">✅</div>
-                <div className="vr-preview-text">
-                  PPTX 已生成！PDF 預覽不可用（需安裝 LibreOffice）。
-                  <br />請使用上方「下載 PPTX」按鈕取得檔案。
+
+              {docs.length > 0 && (
+                <div className="vr-doc-chips">
+                  {docs.map((d, i) => (
+                    <span className="vr-doc-chip" key={i} title={`${d.char_count} 字`}>📄 {d.filename}</span>
+                  ))}
                 </div>
-                {sessionId && (
-                  <a
-                    href={downloadUrl(sessionId)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-primary"
-                    style={{ marginTop: '16px', textDecoration: 'none' }}
-                  >
-                    下載 PPTX
-                  </a>
-                )}
+              )}
+
+              {messages.length > 0 && (
+                <div className="vr-assistant-actions">
+                  <button className="vr-compile-link" onClick={handleCompile} disabled={isCompiling || !sessionId}>
+                    {isCompiling ? '解讀中…' : '↻ 重新整理表單（AI 依目前對話/文件填入）'}
+                  </button>
+                </div>
+              )}
+
+              <div className="vr-input-row">
+                <button className="vr-attach-btn" onClick={handleFilePick} disabled={isUploading || !sessionId} title="上傳文件">
+                  {isUploading ? <span className="vr-spinner" /> : '📎'}
+                </button>
+                <textarea
+                  ref={inputRef}
+                  className="vr-input"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="回答 AI 的提問，或補充資訊… (Enter 送出)"
+                  rows={2}
+                  disabled={isLoading}
+                />
+                <button className="btn btn-primary vr-send-btn" onClick={handleSend} disabled={!input.trim() || isLoading}>
+                  送出
+                </button>
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <div className="vr-preview-body">
+              {!generated ? (
+                <div className="vr-preview-placeholder">
+                  <div className="vr-preview-icon">📊</div>
+                  <div className="vr-preview-text">
+                    {isGenerating ? '正在生成驗證報告，請稍候…' : '填好左側表單後按「生成報告」查看預覽'}
+                  </div>
+                  {isGenerating && <div className="vr-progress-bar"><div className="vr-progress-fill" /></div>}
+                </div>
+              ) : hasPdf && sessionId ? (
+                <iframe key={pdfKey} src={previewUrl(sessionId)} className="vr-pdf-iframe" title="驗證報告 PDF 預覽" />
+              ) : (
+                <div className="vr-preview-placeholder">
+                  <div className="vr-preview-icon">✅</div>
+                  <div className="vr-preview-text">
+                    PPTX 已生成！PDF 預覽不可用（需安裝 LibreOffice）。<br />請用上方「下載 PPTX」取得檔案。
+                  </div>
+                  {sessionId && (
+                    <a href={downloadUrl(sessionId)} target="_blank" rel="noreferrer" className="btn btn-primary" style={{ marginTop: 16, textDecoration: 'none' }}>
+                      下載 PPTX
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <input ref={fileInputRef} type="file" accept=".docx,.pptx,.txt,.md" style={{ display: 'none' }} onChange={handleFileChange} />
         </div>
       </div>
     </div>
