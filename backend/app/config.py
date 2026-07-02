@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     ad_use_ssl: bool = True
     ad_tls_verify: bool = False   # False = accept self-signed internal CA (common on-prem)
     ad_upn_suffix: str = ""       # UPN suffix, e.g. "kh.asegroup.com" → empno@kh.asegroup.com
+    # Optional: the real UPN suffix doesn't always match the domain's base DN
+    # (e.g. base DN "DC=ase,DC=com,DC=tw" but UPN suffix "kh.asegroup.com").
+    # If set, login also tries "empno@<FQDN derived from ad_base_dn>" as a
+    # second UPN candidate when ad_upn_suffix fails, instead of guessing.
+    ad_base_dn: str = ""          # e.g. "DC=ase,DC=com,DC=tw"
+    ad_domain: str = ""           # NetBIOS domain, e.g. "KH" — only used by /test-ad-login's NTLM probes
 
     # --- JWT session cookie ---
     jwt_expire_hours: int = 8     # Token lifetime; 8 h = one work day
