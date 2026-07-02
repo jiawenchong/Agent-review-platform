@@ -8,7 +8,17 @@ touching application code.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# pydantic-settings only auto-loads a literal `.env` file (see env_file below);
+# it has no idea backend/credentials.env exists. Without this line, every
+# APP_AD_SERVER / APP_AD_UPN_SUFFIX / etc. put in credentials.env is silently
+# ignored — ad_server stays "" and login always falls through to the (unused)
+# local-password path. override=False so a real host env var still wins.
+load_dotenv(Path(__file__).resolve().parent.parent / "credentials.env", override=False)
 
 
 class Settings(BaseSettings):
