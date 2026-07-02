@@ -152,33 +152,46 @@ def login(
             raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
         authenticated = True
 
-    # ── Auto-create user on first successful AD login ────────────────────────
+    # ── Auto-create / reconcile the user row ─────────────────────────────────
     is_bootstrap_admin = bool(_BOOTSTRAP_ADMIN_EMPNO) and empno == _BOOTSTRAP_ADMIN_EMPNO
+
+    # A pre-existing row (seed data, or a version before AD fields existed) may
+    # have user_id == empno but empno == NULL, so the lookup-by-empno above
+    # misses it. Fall back to a primary-key lookup before deciding to INSERT,
+    # otherwise the INSERT collides on the PK and the request 500s.
     if user is None:
-        user = User(
-            user_id=empno,
-            name=empno,
-            empno=empno,
-            role="admin" if is_bootstrap_admin else "member",
-            is_manager=is_bootstrap_admin,
-            project_ids=[],
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        user = db.get(User, empno)
 
-    # Backfill empno for pre-existing users that didn't have it set.
-    if not user.empno:
-        user.empno = empno
-        db.commit()
-
-    # Self-healing promotion: if credentials.env designates this empno as the
-    # bootstrap admin but the DB row isn't admin yet (e.g. config was added
-    # after the first login), promote it now. Idempotent — safe every login.
-    if is_bootstrap_admin and user.role != "admin":
-        user.role = "admin"
-        user.is_manager = True
-        db.commit()
+    try:
+        if user is None:
+            user = User(
+                user_id=empno,
+                name=empno,
+                empno=empno,
+                role="admin" if is_bootstrap_admin else "member",
+                is_manager=is_bootstrap_admin,
+                project_ids=[],
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            # Reconcile an existing row in place (never re-INSERT).
+            dirty = False
+            if not user.empno:
+                user.empno = empno
+                dirty = True
+            # Self-healing promotion: if this empno is the designated bootstrap
+            # admin but the row isn't admin yet, promote it. Idempotent.
+            if is_bootstrap_admin and user.role != "admin":
+                user.role = "admin"
+                user.is_manager = True
+                dirty = True
+            if dirty:
+                db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="建立/更新使用者資料時發生錯誤,請聯繫管理員")
 
     # ── Write login log (best-effort, never blocks login) ────────────────────
     try:
